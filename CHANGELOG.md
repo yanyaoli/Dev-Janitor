@@ -1,0 +1,112 @@
+# Changelog
+
+All notable changes to Dev Janitor will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.0.0] - 2024-01-XX
+
+### Added
+
+#### Tool Detection
+- Automatic detection of installed development tools on system startup
+- Support for detecting Node.js, npm, Python, pip, PHP, and Composer
+- Version number and installation path retrieval for each tool
+- Clear visual indicators for installed vs unavailable tools
+- PATH scanning for additional executable tools
+- Multiple installation location detection
+
+#### Package Management
+- NPM global packages listing and management
+- Python pip packages listing and management
+- Composer global packages listing and management
+- Package uninstallation functionality
+- Package search and filtering
+
+#### Service Monitoring
+- Detection of running development processes
+- Port-based service identification
+- Process name, PID, and port display
+- One-click service termination
+- Auto-refresh every 5 seconds
+
+#### Environment Variables
+- Complete system environment variable scanning
+- PATH entry analysis with duplicate detection
+- Category-based filtering (PATH, Java, Python, Node, etc.)
+- Search functionality for variables
+- Problematic configuration highlighting
+
+#### User Interface
+- Clean and intuitive Ant Design-based layout
+- Responsive design for different window sizes
+- Tool cards with status indicators
+- Tabbed package manager interface
+- Service monitoring table with actions
+- Environment variable explorer with PATH analyzer
+
+#### Internationalization
+- English (en-US) language support
+- Chinese Simplified (zh-CN) language support
+- Language switcher in settings
+- Automatic system language detection
+- Persistent language preference
+
+#### Cross-Platform Support
+- Windows 10/11 support
+- macOS 10.15+ support
+- Linux support (AppImage, deb)
+- Platform-specific command execution
+- Proper path format handling per platform
+
+#### Settings & Configuration
+- Language selection
+- About section with version info
+- Application preferences persistence
+
+#### Error Handling
+- Graceful error handling for command failures
+- User-friendly error messages
+- Error boundary for React components
+- Toast notifications for user feedback
+- Continued operation on partial failures
+
+#### Build & Distribution
+- Electron-builder configuration for all platforms
+- Windows installer (exe)
+- macOS disk image (dmg)
+- Linux AppImage and deb packages
+- Application icons and metadata
+- Auto-update support via electron-updater
+
+### Technical Details
+
+- Built with Electron 30 + React 18 + TypeScript
+- Ant Design 5 for UI components
+- Zustand for state management
+- i18next for internationalization
+- Tailwind CSS for styling
+- Vitest + fast-check for testing
+- Vite for development and building
+
+---
+
+## Future Releases
+
+### Planned Features
+- [ ] Tool update functionality
+- [ ] Package update notifications
+- [ ] Custom tool detection rules
+- [ ] Export/import configuration
+- [ ] Dark mode support
+- [ ] System tray integration
+- [ ] Keyboard shortcuts
+- [ ] Plugin system for additional tools
+
+### Known Issues
+- None reported yet
+
+---
+
+[1.0.0]: https://github.com/cocojojo5213/Dev-Janitor/releases/tag/v1.0.0

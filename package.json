@@ -1,0 +1,77 @@
+{
+  "name": "dev-janitor",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Dev Janitor - A cross-platform desktop application for managing development tools and dependencies",
+  "author": "",
+  "homepage": "https://github.com/cocojojo5213/Dev-Janitor",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cocojojo5213/Dev-Janitor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cocojojo5213/Dev-Janitor/issues"
+  },
+  "keywords": [
+    "electron",
+    "development-tools",
+    "nodejs",
+    "python",
+    "npm",
+    "pip",
+    "package-manager",
+    "cross-platform"
+  ],
+  "type": "module",
+  "main": "dist-electron/index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build && electron-builder",
+    "build:win": "tsc && vite build && electron-builder --win",
+    "build:mac": "tsc && vite build && electron-builder --mac",
+    "build:linux": "tsc && vite build && electron-builder --linux",
+    "build:all": "tsc && vite build && electron-builder -mwl",
+    "build:dir": "tsc && vite build && electron-builder --dir",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^5.2.6",
+    "antd": "^5.12.0",
+    "electron-updater": "^6.7.3",
+    "i18next": "^23.7.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-i18next": "^14.0.0",
+    "zustand": "^4.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.30",
+    "@types/react": "^18.2.64",
+    "@types/react-dom": "^18.2.21",
+    "@typescript-eslint/eslint-plugin": "^7.1.1",
+    "@typescript-eslint/parser": "^7.1.1",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.16",
+    "electron": "^30.0.1",
+    "electron-builder": "^24.13.3",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.5",
+    "fast-check": "^4.5.3",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.2.2",
+    "vite": "^5.1.6",
+    "vite-plugin-electron": "^0.28.6",
+    "vite-plugin-electron-renderer": "^0.14.5",
+    "vitest": "^4.0.17"
+  },
+  "license": "MIT"
+}

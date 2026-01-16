@@ -1,0 +1,489 @@
+/**
+ * Service Monitor Module
+ * 
+ * Provides functionality to monitor running services and processes:
+ * - List running services on specified ports
+ * - Identify common development servers
+ * - Kill/stop services by PID
+ * - Auto-refresh monitoring
+ * 
+ * Validates: Requirements 11.1-11.7
+ * Properties: 19 (Running Service Information), 20 (Service Stop Action Availability)
+ */
+
+import { RunningService } from '../shared/types'
+import {
+  isWindows,
+  executeSafe,
+} from './commandExecutor'
+
+/**
+ * Common development service ports to monitor
+ */
+export const COMMON_DEV_PORTS = [
+  3000,  // React, Next.js, Express
+  3001,  // React alternate
+  4000,  // GraphQL, various
+  4200,  // Angular
+  5000,  // Flask, ASP.NET
+  5173,  // Vite
+  5174,  // Vite alternate
+  8000,  // Django, PHP
+  8080,  // Tomcat, various
+  8081,  // Various
+  8888,  // Jupyter
+  9000,  // PHP-FPM, various
+  9229,  // Node.js debugger
+]
+
+/**
+ * Parse Windows netstat output to extract port and PID
+ * Format: "  TCP    0.0.0.0:3000           0.0.0.0:0              LISTENING       12345"
+ * 
+ * @param line A line from netstat output
+ * @returns Object with port and pid, or null if not a listening connection
+ */
+export function parseNetstatLine(line: string): { port: number; pid: number } | null {
+  if (!line || !line.includes('LISTENING')) {
+    return null
+  }
+  
+  // Match TCP/UDP lines with LISTENING state
+  // Format: TCP    0.0.0.0:PORT    ...    LISTENING    PID
+  const parts = line.trim().split(/\s+/)
+  
+  if (parts.length < 5) {
+    return null
+  }
+  
+  // Extract local address (second column)
+  const localAddress = parts[1]
+  if (!localAddress) return null
+  
+  // Extract port from address (e.g., "0.0.0.0:3000" or "[::]:3000")
+  const portMatch = localAddress.match(/:(\d+)$/)
+  if (!portMatch) return null
+  
+  const port = parseInt(portMatch[1], 10)
+  if (isNaN(port)) return null
+  
+  // PID is the last column
+  const pid = parseInt(parts[parts.length - 1], 10)
+  if (isNaN(pid)) return null
+  
+  return { port, pid }
+}
+
+/**
+ * Parse Unix lsof output to extract port and PID
+ * Format: "node      12345 user   23u  IPv4 0x1234      0t0  TCP *:3000 (LISTEN)"
+ * 
+ * @param line A line from lsof output
+ * @returns Object with port, pid, and name, or null if not valid
+ */
+export function parseLsofLine(line: string): { port: number; pid: number; name: string } | null {
+  if (!line || !line.includes('LISTEN')) {
+    return null
+  }
+  
+  const parts = line.trim().split(/\s+/)
+  
+  if (parts.length < 9) {
+    return null
+  }
+  
+  // Process name is first column
+  const name = parts[0]
+  
+  // PID is second column
+  const pid = parseInt(parts[1], 10)
+  if (isNaN(pid)) return null
+  
+  // Find the port in the TCP column (e.g., "*:3000" or "localhost:3000")
+  const tcpInfo = parts.find(p => p.includes(':') && (p.includes('*:') || /:\d+/.test(p)))
+  if (!tcpInfo) return null
+  
+  const portMatch = tcpInfo.match(/:(\d+)/)
+  if (!portMatch) return null
+  
+  const port = parseInt(portMatch[1], 10)
+  if (isNaN(port)) return null
+  
+  return { port, pid, name }
+}
+
+/**
+ * Get process name by PID on Windows using tasklist
+ * 
+ * @param pid Process ID
+ * @returns Promise resolving to process name or null
+ */
+async function getWindowsProcessName(pid: number): Promise<string | null> {
+  const result = await executeSafe(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`)
+  
+  if (!result.success || !result.stdout) {
+    return null
+  }
+  
+  // Format: "process.exe","12345","Console","1","12,345 K"
+  const match = result.stdout.match(/"([^"]+)"/)
+  return match ? match[1] : null
+}
+
+/**
+ * Get process command line by PID on Windows
+ * 
+ * @param pid Process ID
+ * @returns Promise resolving to command line or empty string
+ */
+async function getWindowsProcessCommand(pid: number): Promise<string> {
+  const result = await executeSafe(
+    `wmic process where ProcessId=${pid} get CommandLine /format:list`
+  )
+  
+  if (!result.success || !result.stdout) {
+    return ''
+  }
+  
+  const match = result.stdout.match(/CommandLine=(.+)/i)
+  return match ? match[1].trim() : ''
+}
+
+/**
+ * Get process information by PID on Unix using ps
+ * 
+ * @param pid Process ID
+ * @returns Promise resolving to process info or null
+ */
+async function getUnixProcessInfo(pid: number): Promise<{ name: string; command: string } | null> {
+  const result = await executeSafe(`ps -p ${pid} -o comm=,args=`)
+  
+  if (!result.success || !result.stdout) {
+    return null
+  }
+  
+  const output = result.stdout.trim()
+  if (!output) return null
+  
+  // First word is the command name, rest is the full command
+  const parts = output.split(/\s+/)
+  const name = parts[0] || ''
+  const command = output
+  
+  return { name, command }
+}
+
+/**
+ * List running services on Windows
+ * Uses netstat -ano to find listening ports and tasklist for process names
+ * 
+ * @returns Promise resolving to array of RunningService
+ */
+async function listWindowsServices(): Promise<RunningService[]> {
+  const services: RunningService[] = []
+  const seenPids = new Set<number>()
+  
+  // Get listening ports with PIDs
+  const netstatResult = await executeSafe('netstat -ano -p TCP')
+  
+  if (!netstatResult.success) {
+    return services
+  }
+  
+  const lines = netstatResult.stdout.split('\n')
+  
+  for (const line of lines) {
+    const parsed = parseNetstatLine(line)
+    
+    if (!parsed || seenPids.has(parsed.pid)) {
+      continue
+    }
+    
+    // Skip system processes (PID 0 and 4)
+    if (parsed.pid === 0 || parsed.pid === 4) {
+      continue
+    }
+    
+    seenPids.add(parsed.pid)
+    
+    // Get process name and command
+    const name = await getWindowsProcessName(parsed.pid)
+    const command = await getWindowsProcessCommand(parsed.pid)
+    
+    if (name) {
+      services.push({
+        pid: parsed.pid,
+        name,
+        port: parsed.port,
+        command: command || name,
+      })
+    }
+  }
+  
+  return services
+}
+
+/**
+ * List running services on Unix (macOS/Linux)
+ * Uses lsof -i to find listening ports
+ * 
+ * @returns Promise resolving to array of RunningService
+ */
+async function listUnixServices(): Promise<RunningService[]> {
+  const services: RunningService[] = []
+  const seenPids = new Set<number>()
+  
+  // Get listening ports with process info
+  const lsofResult = await executeSafe('lsof -i -P -n | grep LISTEN')
+  
+  if (!lsofResult.success && !lsofResult.stdout) {
+    // Try alternative: ss command on Linux
+    const ssResult = await executeSafe('ss -tlnp')
+    if (ssResult.success && ssResult.stdout) {
+      return parseSSOutput(ssResult.stdout)
+    }
+    return services
+  }
+  
+  const lines = lsofResult.stdout.split('\n')
+  
+  for (const line of lines) {
+    const parsed = parseLsofLine(line)
+    
+    if (!parsed || seenPids.has(parsed.pid)) {
+      continue
+    }
+    
+    seenPids.add(parsed.pid)
+    
+    // Get full process info
+    const processInfo = await getUnixProcessInfo(parsed.pid)
+    
+    services.push({
+      pid: parsed.pid,
+      name: parsed.name,
+      port: parsed.port,
+      command: processInfo?.command || parsed.name,
+    })
+  }
+  
+  return services
+}
+
+/**
+ * Parse ss command output (Linux alternative to lsof)
+ * Format: "LISTEN  0  128  *:3000  *:*  users:(("node",pid=12345,fd=23))"
+ * 
+ * @param output The ss command output
+ * @returns Array of RunningService
+ */
+function parseSSOutput(output: string): RunningService[] {
+  const services: RunningService[] = []
+  const seenPids = new Set<number>()
+  const lines = output.split('\n')
+  
+  for (const line of lines) {
+    if (!line.includes('LISTEN')) continue
+    
+    // Extract port
+    const portMatch = line.match(/\*:(\d+)/)
+    if (!portMatch) continue
+    const port = parseInt(portMatch[1], 10)
+    
+    // Extract PID and process name
+    const processMatch = line.match(/\("([^"]+)",pid=(\d+)/)
+    if (!processMatch) continue
+    
+    const name = processMatch[1]
+    const pid = parseInt(processMatch[2], 10)
+    
+    if (seenPids.has(pid)) continue
+    seenPids.add(pid)
+    
+    services.push({
+      pid,
+      name,
+      port,
+      command: name,
+    })
+  }
+  
+  return services
+}
+
+/**
+ * List all running services
+ * 
+ * Property 19: Running Service Information
+ * Validates: Requirements 11.1, 11.2, 11.3
+ * 
+ * @returns Promise resolving to array of RunningService
+ */
+export async function listRunningServices(): Promise<RunningService[]> {
+  if (isWindows()) {
+    return listWindowsServices()
+  }
+  return listUnixServices()
+}
+
+/**
+ * Find a service by port number
+ * 
+ * @param port The port number to search for
+ * @returns Promise resolving to RunningService or null
+ */
+export async function findServiceByPort(port: number): Promise<RunningService | null> {
+  const services = await listRunningServices()
+  return services.find(s => s.port === port) || null
+}
+
+/**
+ * Kill a service by PID
+ * 
+ * Property 20: Service Stop Action Availability
+ * Validates: Requirements 11.5, 11.7
+ * 
+ * @param pid The process ID to kill
+ * @returns Promise resolving to true if successful
+ */
+export async function killService(pid: number): Promise<boolean> {
+  if (pid <= 0) {
+    return false
+  }
+  
+  // Don't allow killing system processes
+  if (pid === 1 || pid === 4) {
+    return false
+  }
+  
+  let result
+  
+  if (isWindows()) {
+    // Windows: use taskkill
+    result = await executeSafe(`taskkill /PID ${pid} /F`)
+  } else {
+    // Unix: use kill
+    result = await executeSafe(`kill -9 ${pid}`)
+  }
+  
+  return result.success
+}
+
+/**
+ * Filter services to only include common development ports
+ * 
+ * @param services Array of services to filter
+ * @returns Filtered array of services on common dev ports
+ */
+export function filterDevServices(services: RunningService[]): RunningService[] {
+  return services.filter(s => s.port && COMMON_DEV_PORTS.includes(s.port))
+}
+
+/**
+ * ServiceMonitor class providing monitoring functionality with auto-refresh
+ */
+export class ServiceMonitor {
+  private monitoringInterval: NodeJS.Timeout | null = null
+  private listeners: ((services: RunningService[]) => void)[] = []
+  
+  /**
+   * List all running services
+   */
+  async listRunningServices(): Promise<RunningService[]> {
+    return listRunningServices()
+  }
+  
+  /**
+   * Find a service by port
+   */
+  async findServiceByPort(port: number): Promise<RunningService | null> {
+    return findServiceByPort(port)
+  }
+  
+  /**
+   * Kill a service by PID
+   */
+  async killService(pid: number): Promise<boolean> {
+    return killService(pid)
+  }
+  
+  /**
+   * Start auto-monitoring services
+   * 
+   * Validates: Requirement 11.6 (refresh every 5 seconds)
+   * @param interval Refresh interval in milliseconds (default: 5000)
+   */
+  startMonitoring(interval: number = 5000): void {
+    if (this.monitoringInterval) {
+      this.stopMonitoring()
+    }
+    
+    this.monitoringInterval = setInterval(async () => {
+      try {
+        const services = await this.listRunningServices()
+        this.notifyListeners(services)
+      } catch {
+        // Silently handle errors during monitoring
+      }
+    }, interval)
+  }
+  
+  /**
+   * Stop auto-monitoring
+   */
+  stopMonitoring(): void {
+    if (this.monitoringInterval) {
+      clearInterval(this.monitoringInterval)
+      this.monitoringInterval = null
+    }
+  }
+  
+  /**
+   * Add a listener for service updates
+   * @param listener Callback function to receive service updates
+   */
+  addListener(listener: (services: RunningService[]) => void): void {
+    this.listeners.push(listener)
+  }
+  
+  /**
+   * Remove a listener
+   * @param listener The listener to remove
+   */
+  removeListener(listener: (services: RunningService[]) => void): void {
+    const index = this.listeners.indexOf(listener)
+    if (index !== -1) {
+      this.listeners.splice(index, 1)
+    }
+  }
+  
+  /**
+   * Notify all listeners of service updates
+   */
+  private notifyListeners(services: RunningService[]): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(services)
+      } catch {
+        // Ignore listener errors
+      }
+    }
+  }
+  
+  /**
+   * Filter services to common development ports
+   */
+  filterDevServices(services: RunningService[]): RunningService[] {
+    return filterDevServices(services)
+  }
+  
+  /**
+   * Check if monitoring is active
+   */
+  isMonitoring(): boolean {
+    return this.monitoringInterval !== null
+  }
+}
+
+// Export a default instance
+export const serviceMonitor = new ServiceMonitor()

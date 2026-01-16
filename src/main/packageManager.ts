@@ -1,0 +1,454 @@
+/**
+ * Package Manager Module
+ * 
+ * Provides functionality to list and manage packages from:
+ * - npm (global packages)
+ * - pip (Python packages)
+ * - composer (PHP packages)
+ * 
+ * Validates: Requirements 3.1, 3.2, 4.1, 4.2
+ */
+
+import { PackageInfo } from '../shared/types'
+import { executeSafe, isWindows } from './commandExecutor'
+
+/**
+ * npm package list JSON structure
+ */
+interface NpmListOutput {
+  dependencies?: {
+    [key: string]: {
+      version: string
+      resolved?: string
+    }
+  }
+}
+
+/**
+ * pip package list JSON structure
+ */
+interface PipPackage {
+  name: string
+  version: string
+}
+
+/**
+ * composer package structure
+ */
+interface ComposerPackage {
+  name: string
+  version: string
+  description?: string
+  homepage?: string
+}
+
+/**
+ * Parse npm list JSON output
+ * 
+ * Property 6: Package List Parsing
+ * @param output The JSON output from npm list
+ * @returns Array of PackageInfo
+ */
+export function parseNpmOutput(output: string): PackageInfo[] {
+  const packages: PackageInfo[] = []
+  
+  if (!output || typeof output !== 'string') {
+    return packages
+  }
+  
+  try {
+    const data: NpmListOutput = JSON.parse(output)
+    
+    if (data.dependencies) {
+      for (const [name, info] of Object.entries(data.dependencies)) {
+        packages.push({
+          name,
+          version: info.version || 'unknown',
+          location: 'global',
+          manager: 'npm',
+        })
+      }
+    }
+  } catch {
+    // JSON parsing failed, try to extract info from text output
+    // npm list output format: "├── package@version"
+    const lines = output.split('\n')
+    const packageRegex = /[├└]── (.+)@(.+)/
+    
+    for (const line of lines) {
+      const match = line.match(packageRegex)
+      if (match) {
+        packages.push({
+          name: match[1],
+          version: match[2],
+          location: 'global',
+          manager: 'npm',
+        })
+      }
+    }
+  }
+  
+  return packages
+}
+
+/**
+ * Parse pip list JSON output
+ * 
+ * Property 6: Package List Parsing
+ * @param output The JSON output from pip list
+ * @returns Array of PackageInfo
+ */
+export function parsePipOutput(output: string): PackageInfo[] {
+  const packages: PackageInfo[] = []
+  
+  if (!output || typeof output !== 'string') {
+    return packages
+  }
+  
+  try {
+    const data: PipPackage[] = JSON.parse(output)
+    
+    for (const pkg of data) {
+      packages.push({
+        name: pkg.name,
+        version: pkg.version,
+        location: 'site-packages',
+        manager: 'pip',
+      })
+    }
+  } catch {
+    // JSON parsing failed, try to extract from text output
+    // pip list output format: "package    version"
+    const lines = output.split('\n')
+    
+    // Skip header lines
+    let startIndex = 0
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes('---')) {
+        startIndex = i + 1
+        break
+      }
+    }
+    
+    for (let i = startIndex; i < lines.length; i++) {
+      const line = lines[i].trim()
+      if (!line) continue
+      
+      const parts = line.split(/\s+/)
+      if (parts.length >= 2) {
+        packages.push({
+          name: parts[0],
+          version: parts[1],
+          location: 'site-packages',
+          manager: 'pip',
+        })
+      }
+    }
+  }
+  
+  return packages
+}
+
+/**
+ * Parse composer global show output
+ * 
+ * Property 6: Package List Parsing
+ * @param output The output from composer global show
+ * @returns Array of PackageInfo
+ */
+export function parseComposerOutput(output: string): PackageInfo[] {
+  const packages: PackageInfo[] = []
+  
+  if (!output || typeof output !== 'string') {
+    return packages
+  }
+  
+  try {
+    // Try JSON format first
+    const data = JSON.parse(output)
+    
+    if (Array.isArray(data)) {
+      for (const pkg of data as ComposerPackage[]) {
+        packages.push({
+          name: pkg.name,
+          version: pkg.version,
+          location: 'global',
+          manager: 'composer',
+          description: pkg.description,
+          homepage: pkg.homepage,
+        })
+      }
+    } else if (data.installed) {
+      // Alternative JSON structure
+      for (const pkg of data.installed as ComposerPackage[]) {
+        packages.push({
+          name: pkg.name,
+          version: pkg.version,
+          location: 'global',
+          manager: 'composer',
+          description: pkg.description,
+          homepage: pkg.homepage,
+        })
+      }
+    }
+  } catch {
+    // JSON parsing failed, try text format
+    // composer global show output: "vendor/package version description"
+    const lines = output.split('\n')
+    
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      
+      // Match pattern: vendor/package vX.Y.Z description
+      const match = trimmed.match(/^([\w-]+\/[\w-]+)\s+(v?[\d.]+(?:-[\w.]+)?)\s*(.*)$/)
+      if (match) {
+        packages.push({
+          name: match[1],
+          version: match[2],
+          location: 'global',
+          manager: 'composer',
+          description: match[3] || undefined,
+        })
+      }
+    }
+  }
+  
+  return packages
+}
+
+
+/**
+ * List globally installed npm packages
+ * 
+ * Property 5: Package Information Completeness
+ * Validates: Requirements 3.1, 3.2
+ * @returns Promise resolving to array of PackageInfo
+ */
+export async function listNpmPackages(): Promise<PackageInfo[]> {
+  const result = await executeSafe('npm list -g --depth=0 --json')
+  
+  if (!result.success && !result.stdout) {
+    return []
+  }
+  
+  // npm may return non-zero exit code but still have valid output
+  return parseNpmOutput(result.stdout)
+}
+
+/**
+ * List installed pip packages
+ * 
+ * Property 5: Package Information Completeness
+ * Validates: Requirements 4.1, 4.2
+ * @returns Promise resolving to array of PackageInfo
+ */
+export async function listPipPackages(): Promise<PackageInfo[]> {
+  // Try pip3 first, then pip
+  let result = await executeSafe('pip3 list --format=json')
+  
+  if (!result.success || !result.stdout) {
+    result = await executeSafe('pip list --format=json')
+  }
+  
+  if (!result.success && !result.stdout) {
+    return []
+  }
+  
+  return parsePipOutput(result.stdout)
+}
+
+/**
+ * List globally installed composer packages
+ * 
+ * Property 5: Package Information Completeness
+ * @returns Promise resolving to array of PackageInfo
+ */
+export async function listComposerPackages(): Promise<PackageInfo[]> {
+  const result = await executeSafe('composer global show --format=json')
+  
+  if (!result.success && !result.stdout) {
+    // Try without --format=json for older versions
+    const textResult = await executeSafe('composer global show')
+    if (textResult.success && textResult.stdout) {
+      return parseComposerOutput(textResult.stdout)
+    }
+    return []
+  }
+  
+  return parseComposerOutput(result.stdout)
+}
+
+/**
+ * Uninstall a package using the appropriate package manager
+ * 
+ * @param packageName The name of the package to uninstall
+ * @param manager The package manager to use
+ * @returns Promise resolving to true if successful
+ */
+export async function uninstallPackage(
+  packageName: string,
+  manager: 'npm' | 'pip' | 'composer'
+): Promise<boolean> {
+  let command: string
+  
+  switch (manager) {
+    case 'npm':
+      command = `npm uninstall -g ${packageName}`
+      break
+    case 'pip':
+      // Use -y to auto-confirm
+      command = `pip uninstall -y ${packageName}`
+      break
+    case 'composer':
+      command = `composer global remove ${packageName}`
+      break
+    default:
+      return false
+  }
+  
+  const result = await executeSafe(command)
+  return result.success
+}
+
+/**
+ * Get the global installation path for a package manager
+ * 
+ * @param manager The package manager
+ * @returns Promise resolving to the global path or null
+ */
+export async function getGlobalPath(
+  manager: 'npm' | 'pip' | 'composer'
+): Promise<string | null> {
+  let command: string
+  
+  switch (manager) {
+    case 'npm':
+      command = 'npm root -g'
+      break
+    case 'pip':
+      // Get site-packages location
+      command = isWindows()
+        ? 'python -c "import site; print(site.getsitepackages()[0])"'
+        : 'python3 -c "import site; print(site.getsitepackages()[0])"'
+      break
+    case 'composer':
+      command = 'composer global config home'
+      break
+    default:
+      return null
+  }
+  
+  const result = await executeSafe(command)
+  
+  if (result.success && result.stdout) {
+    return result.stdout.trim()
+  }
+  
+  return null
+}
+
+/**
+ * Check if a package manager is available
+ * 
+ * @param manager The package manager to check
+ * @returns Promise resolving to true if available
+ */
+export async function isPackageManagerAvailable(
+  manager: 'npm' | 'pip' | 'composer'
+): Promise<boolean> {
+  let command: string
+  
+  switch (manager) {
+    case 'npm':
+      command = 'npm --version'
+      break
+    case 'pip':
+      command = 'pip3 --version'
+      break
+    case 'composer':
+      command = 'composer --version'
+      break
+    default:
+      return false
+  }
+  
+  const result = await executeSafe(command)
+  return result.success
+}
+
+/**
+ * PackageManager class providing an object-oriented interface
+ */
+export class PackageManager {
+  /**
+   * List npm global packages
+   */
+  async listNpmPackages(): Promise<PackageInfo[]> {
+    return listNpmPackages()
+  }
+  
+  /**
+   * List pip packages
+   */
+  async listPipPackages(): Promise<PackageInfo[]> {
+    return listPipPackages()
+  }
+  
+  /**
+   * List composer global packages
+   */
+  async listComposerPackages(): Promise<PackageInfo[]> {
+    return listComposerPackages()
+  }
+  
+  /**
+   * Uninstall a package
+   */
+  async uninstallPackage(
+    packageName: string,
+    manager: 'npm' | 'pip' | 'composer'
+  ): Promise<boolean> {
+    return uninstallPackage(packageName, manager)
+  }
+  
+  /**
+   * Get global installation path
+   */
+  async getGlobalPath(manager: 'npm' | 'pip' | 'composer'): Promise<string | null> {
+    return getGlobalPath(manager)
+  }
+  
+  /**
+   * Check if package manager is available
+   */
+  async isPackageManagerAvailable(
+    manager: 'npm' | 'pip' | 'composer'
+  ): Promise<boolean> {
+    return isPackageManagerAvailable(manager)
+  }
+  
+  /**
+   * Parse npm output
+   */
+  parseNpmOutput(output: string): PackageInfo[] {
+    return parseNpmOutput(output)
+  }
+  
+  /**
+   * Parse pip output
+   */
+  parsePipOutput(output: string): PackageInfo[] {
+    return parsePipOutput(output)
+  }
+  
+  /**
+   * Parse composer output
+   */
+  parseComposerOutput(output: string): PackageInfo[] {
+    return parseComposerOutput(output)
+  }
+}
+
+// Export a default instance
+export const packageManager = new PackageManager()

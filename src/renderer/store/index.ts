@@ -1,0 +1,495 @@
+/**
+ * Zustand Store for Dev Tools Manager
+ * 
+ * Manages application state for tools, packages, services, and environment.
+ * Integrates IPC calls to communicate with the main process.
+ * 
+ * Validates: Requirements 2.1, 7.3, 13.1-13.8
+ */
+
+import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
+import type { ToolInfo, PackageInfo, RunningService, EnvironmentVariable, ViewType, SupportedLanguage } from '@shared/types'
+import { ipcClient } from '../ipc'
+import i18n from '../i18n'
+
+// ============================================================================
+// State Interface
+// ============================================================================
+
+interface AppState {
+  // Tools
+  tools: ToolInfo[]
+  toolsLoading: boolean
+  toolsError: string | null
+  
+  // Packages
+  npmPackages: PackageInfo[]
+  pipPackages: PackageInfo[]
+  composerPackages: PackageInfo[]
+  packagesLoading: boolean
+  packagesError: string | null
+  
+  // Services
+  runningServices: RunningService[]
+  servicesLoading: boolean
+  servicesError: string | null
+  
+  // Environment
+  environmentVariables: EnvironmentVariable[]
+  pathEntries: string[]
+  envLoading: boolean
+  envError: string | null
+  
+  // UI
+  currentView: ViewType
+  language: SupportedLanguage
+  
+  // Detection progress
+  detectionProgress: number
+  
+  // Actions - Data Loading
+  loadTools: () => Promise<void>
+  loadPackages: (manager?: 'npm' | 'pip' | 'composer' | 'all') => Promise<void>
+  loadServices: () => Promise<void>
+  loadEnvironment: () => Promise<void>
+  refreshAll: () => Promise<void>
+  
+  // Actions - Service Management
+  killService: (pid: number) => Promise<boolean>
+  
+  // Actions - Package Management
+  uninstallPackage: (name: string, manager: 'npm' | 'pip' | 'composer') => Promise<boolean>
+  
+  // Actions - UI
+  setCurrentView: (view: ViewType) => void
+  setLanguage: (lang: SupportedLanguage) => void
+  
+  // Actions - State Setters (for direct updates)
+  setTools: (tools: ToolInfo[]) => void
+  setToolsLoading: (loading: boolean) => void
+  setToolsError: (error: string | null) => void
+  setNpmPackages: (packages: PackageInfo[]) => void
+  setPipPackages: (packages: PackageInfo[]) => void
+  setComposerPackages: (packages: PackageInfo[]) => void
+  setPackagesLoading: (loading: boolean) => void
+  setPackagesError: (error: string | null) => void
+  setRunningServices: (services: RunningService[]) => void
+  setServicesLoading: (loading: boolean) => void
+  setServicesError: (error: string | null) => void
+  setEnvironmentVariables: (vars: EnvironmentVariable[]) => void
+  setPathEntries: (entries: string[]) => void
+  setEnvLoading: (loading: boolean) => void
+  setEnvError: (error: string | null) => void
+  setDetectionProgress: (progress: number) => void
+  
+  // Actions - Error Clearing
+  clearErrors: () => void
+  
+  // Actions - Initialization
+  initializeLanguage: () => Promise<void>
+}
+
+// ============================================================================
+// Store Creation
+// ============================================================================
+
+export const useAppStore = create<AppState>()(
+  persist(
+    (set, get) => ({
+      // ========================================================================
+      // Initial State
+      // ========================================================================
+      
+      // Tools
+      tools: [],
+      toolsLoading: false,
+      toolsError: null,
+      
+      // Packages
+      npmPackages: [],
+      pipPackages: [],
+      composerPackages: [],
+      packagesLoading: false,
+      packagesError: null,
+      
+      // Services
+      runningServices: [],
+      servicesLoading: false,
+      servicesError: null,
+      
+      // Environment
+      environmentVariables: [],
+      pathEntries: [],
+      envLoading: false,
+      envError: null,
+      
+      // UI
+      currentView: 'tools',
+      language: 'en-US',
+      
+      // Detection progress
+      detectionProgress: 0,
+      
+      // ========================================================================
+      // Data Loading Actions
+      // ========================================================================
+      
+      /**
+       * Load all development tools
+       * Validates: Requirements 1.1, 2.1
+       */
+      loadTools: async () => {
+        set({ toolsLoading: true, toolsError: null, detectionProgress: 0 })
+        
+        try {
+          const tools = await ipcClient.tools.detectAll()
+          set({ tools, toolsLoading: false, detectionProgress: 100 })
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Failed to detect tools'
+          set({ toolsError: errorMessage, toolsLoading: false })
+          console.error('Failed to load tools:', error)
+        }
+      },
+      
+      /**
+       * Load packages from specified manager(s)
+       * Validates: Requirements 3.1, 4.1
+       */
+      loadPackages: async (manager = 'all') => {
+        set({ packagesLoading: true, packagesError: null })
+        
+        try {
+          if (manager === 'all' || manager === 'npm') {
+            const npmPackages = await ipcClient.packages.listNpm()
+            set({ npmPackages })
+          }
+          
+          if (manager === 'all' || manager === 'pip') {
+            const pipPackages = await ipcClient.packages.listPip()
+            set({ pipPackages })
+          }
+          
+          if (manager === 'all' || manager === 'composer') {
+            const composerPackages = await ipcClient.packages.listComposer()
+            set({ composerPackages })
+          }
+          
+          set({ packagesLoading: false })
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Failed to load packages'
+          set({ packagesError: errorMessage, packagesLoading: false })
+          console.error('Failed to load packages:', error)
+        }
+      },
+      
+      /**
+       * Load running services
+       * Validates: Requirements 11.1, 11.3
+       */
+      loadServices: async () => {
+        set({ servicesLoading: true, servicesError: null })
+        
+        try {
+          const runningServices = await ipcClient.services.list()
+          set({ runningServices, servicesLoading: false })
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Failed to load services'
+          set({ servicesError: errorMessage, servicesLoading: false })
+          console.error('Failed to load services:', error)
+        }
+      },
+      
+      /**
+       * Load environment variables
+       * Validates: Requirements 10.1, 10.3
+       */
+      loadEnvironment: async () => {
+        set({ envLoading: true, envError: null })
+        
+        try {
+          const [environmentVariables, pathEntries] = await Promise.all([
+            ipcClient.env.getAll(),
+            ipcClient.env.getPath(),
+          ])
+          set({ environmentVariables, pathEntries, envLoading: false })
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Failed to load environment'
+          set({ envError: errorMessage, envLoading: false })
+          console.error('Failed to load environment:', error)
+        }
+      },
+      
+      /**
+       * Refresh all data
+       * Validates: Requirements 7.1, 7.2, 7.3
+       */
+      refreshAll: async () => {
+        const { loadTools, loadPackages, loadServices, loadEnvironment } = get()
+        
+        // Run all loads in parallel for better performance
+        await Promise.all([
+          loadTools(),
+          loadPackages('all'),
+          loadServices(),
+          loadEnvironment(),
+        ])
+      },
+      
+      // ========================================================================
+      // Service Management Actions
+      // ========================================================================
+      
+      /**
+       * Kill a running service
+       * Validates: Requirements 11.5, 11.7
+       */
+      killService: async (pid: number) => {
+        try {
+          const success = await ipcClient.services.kill(pid)
+          
+          if (success) {
+            // Remove the service from the list
+            const { runningServices } = get()
+            set({
+              runningServices: runningServices.filter(s => s.pid !== pid)
+            })
+          }
+          
+          return success
+        } catch (error) {
+          console.error('Failed to kill service:', error)
+          return false
+        }
+      },
+      
+      // ========================================================================
+      // Package Management Actions
+      // ========================================================================
+      
+      /**
+       * Uninstall a package
+       * Validates: Requirements 6.4
+       */
+      uninstallPackage: async (name: string, manager: 'npm' | 'pip' | 'composer') => {
+        try {
+          const success = await ipcClient.packages.uninstall(name, manager)
+          
+          if (success) {
+            // Remove the package from the appropriate list
+            const state = get()
+            
+            if (manager === 'npm') {
+              set({ npmPackages: state.npmPackages.filter(p => p.name !== name) })
+            } else if (manager === 'pip') {
+              set({ pipPackages: state.pipPackages.filter(p => p.name !== name) })
+            } else if (manager === 'composer') {
+              set({ composerPackages: state.composerPackages.filter(p => p.name !== name) })
+            }
+          }
+          
+          return success
+        } catch (error) {
+          console.error('Failed to uninstall package:', error)
+          return false
+        }
+      },
+      
+      // ========================================================================
+      // UI Actions
+      // ========================================================================
+      
+      /**
+       * Set the current view
+       */
+      setCurrentView: (view: ViewType) => {
+        set({ currentView: view })
+      },
+      
+      /**
+       * Set the language and persist it
+       * Validates: Requirements 13.4, 13.5
+       */
+      setLanguage: (lang: SupportedLanguage) => {
+        set({ language: lang })
+        
+        // Update i18next language
+        i18n.changeLanguage(lang)
+        
+        // Persist to main process (for system-level persistence)
+        if (ipcClient.isElectron()) {
+          ipcClient.settings.setLanguage(lang).catch(error => {
+            console.error('Failed to persist language setting:', error)
+          })
+        }
+      },
+      
+      // ========================================================================
+      // State Setters (for direct updates from IPC events)
+      // ========================================================================
+      
+      setTools: (tools: ToolInfo[]) => set({ tools }),
+      setToolsLoading: (loading: boolean) => set({ toolsLoading: loading }),
+      setToolsError: (error: string | null) => set({ toolsError: error }),
+      setNpmPackages: (packages: PackageInfo[]) => set({ npmPackages: packages }),
+      setPipPackages: (packages: PackageInfo[]) => set({ pipPackages: packages }),
+      setComposerPackages: (packages: PackageInfo[]) => set({ composerPackages: packages }),
+      setPackagesLoading: (loading: boolean) => set({ packagesLoading: loading }),
+      setPackagesError: (error: string | null) => set({ packagesError: error }),
+      setRunningServices: (services: RunningService[]) => set({ runningServices: services }),
+      setServicesLoading: (loading: boolean) => set({ servicesLoading: loading }),
+      setServicesError: (error: string | null) => set({ servicesError: error }),
+      setEnvironmentVariables: (vars: EnvironmentVariable[]) => set({ environmentVariables: vars }),
+      setPathEntries: (entries: string[]) => set({ pathEntries: entries }),
+      setEnvLoading: (loading: boolean) => set({ envLoading: loading }),
+      setEnvError: (error: string | null) => set({ envError: error }),
+      setDetectionProgress: (progress: number) => set({ detectionProgress: progress }),
+      
+      // ========================================================================
+      // Error Clearing
+      // ========================================================================
+      
+      /**
+       * Clear all error states
+       */
+      clearErrors: () => {
+        set({
+          toolsError: null,
+          packagesError: null,
+          servicesError: null,
+          envError: null,
+        })
+      },
+      
+      // ========================================================================
+      // Initialization
+      // ========================================================================
+      
+      /**
+       * Initialize language from persisted settings or system default
+       * Validates: Requirements 13.5, 13.6
+       */
+      initializeLanguage: async () => {
+        try {
+          if (ipcClient.isElectron()) {
+            // Try to get persisted language from main process
+            const persistedLang = await ipcClient.settings.getLanguage()
+            
+            if (persistedLang && (persistedLang === 'zh-CN' || persistedLang === 'en-US')) {
+              set({ language: persistedLang })
+              i18n.changeLanguage(persistedLang)
+              return
+            }
+          }
+          
+          // Fall back to system language detection
+          const systemLang = detectSystemLanguage()
+          set({ language: systemLang })
+          i18n.changeLanguage(systemLang)
+        } catch (error) {
+          console.error('Failed to initialize language:', error)
+          // Keep default language (en-US)
+        }
+      },
+    }),
+    {
+      name: 'dev-tools-manager-storage',
+      storage: createJSONStorage(() => localStorage),
+      // Only persist UI preferences, not data
+      partialize: (state) => ({
+        language: state.language,
+        currentView: state.currentView,
+      }),
+    }
+  )
+)
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Detect system language and return supported language code
+ * Validates: Requirements 13.6
+ */
+function detectSystemLanguage(): SupportedLanguage {
+  if (typeof navigator !== 'undefined') {
+    const lang = navigator.language || (navigator as { userLanguage?: string }).userLanguage || 'en-US'
+    
+    // Check for Chinese variants
+    if (lang.startsWith('zh')) {
+      return 'zh-CN'
+    }
+  }
+  
+  return 'en-US'
+}
+
+// ============================================================================
+// Store Hooks for Specific State Slices
+// ============================================================================
+
+/**
+ * Hook for tools state
+ */
+export const useToolsState = () => useAppStore((state) => ({
+  tools: state.tools,
+  loading: state.toolsLoading,
+  error: state.toolsError,
+  loadTools: state.loadTools,
+}))
+
+/**
+ * Hook for packages state
+ */
+export const usePackagesState = () => useAppStore((state) => ({
+  npmPackages: state.npmPackages,
+  pipPackages: state.pipPackages,
+  composerPackages: state.composerPackages,
+  loading: state.packagesLoading,
+  error: state.packagesError,
+  loadPackages: state.loadPackages,
+  uninstallPackage: state.uninstallPackage,
+}))
+
+/**
+ * Hook for services state
+ */
+export const useServicesState = () => useAppStore((state) => ({
+  services: state.runningServices,
+  loading: state.servicesLoading,
+  error: state.servicesError,
+  loadServices: state.loadServices,
+  killService: state.killService,
+}))
+
+/**
+ * Hook for environment state
+ */
+export const useEnvironmentState = () => useAppStore((state) => ({
+  variables: state.environmentVariables,
+  pathEntries: state.pathEntries,
+  loading: state.envLoading,
+  error: state.envError,
+  loadEnvironment: state.loadEnvironment,
+}))
+
+/**
+ * Hook for UI state
+ */
+export const useUIState = () => useAppStore((state) => ({
+  currentView: state.currentView,
+  language: state.language,
+  setCurrentView: state.setCurrentView,
+  setLanguage: state.setLanguage,
+}))
+
+/**
+ * Hook for detection progress
+ */
+export const useDetectionProgress = () => useAppStore((state) => ({
+  progress: state.detectionProgress,
+  setProgress: state.setDetectionProgress,
+}))
+
+export default useAppStore

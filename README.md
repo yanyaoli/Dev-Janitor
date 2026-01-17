@@ -21,8 +21,8 @@
   <img src="https://img.shields.io/badge/version-1.0.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT%20with%20Commons%20Clause-green.svg" alt="License">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="Platform">
-  <img src="https://img.shields.io/badge/electron-30.0.1-9feaf9.svg" alt="Electron">
-  <img src="https://img.shields.io/badge/react-18.2.0-61dafb.svg" alt="React">
+  <img src="https://img.shields.io/badge/electron-33.3.1-9feaf9.svg" alt="Electron">
+  <img src="https://img.shields.io/badge/react-18.3.1-61dafb.svg" alt="React">
 </p>
 
 ---
@@ -213,7 +213,7 @@ Customize your experience:
 
 ### Tech Stack
 
-- **Framework**: Electron 30
+- **Framework**: Electron 33
 - **Frontend**: React 18 + TypeScript
 - **UI Library**: Ant Design 5
 - **State Management**: Zustand

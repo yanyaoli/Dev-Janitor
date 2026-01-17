@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-1.2.0-blue.svg" alt="版本">
+  <img src="https://img.shields.io/badge/版本-1.4.0-blue.svg" alt="版本">
   <img src="https://img.shields.io/badge/许可证-MIT%20with%20Commons%20Clause-green.svg" alt="许可证">
   <img src="https://img.shields.io/badge/平台-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="平台">
   <img src="https://img.shields.io/badge/electron-33.3.1-9feaf9.svg" alt="Electron">
@@ -35,10 +35,18 @@ Dev Janitor（开发清道夫）是一款功能强大的桌面应用程序，旨
 
 ### 🔍 工具检测
 - **自动检测**：自动扫描和检测已安装的开发工具
-- **支持的工具**：Node.js、Python、PHP、Java、Go、Rust、Ruby、.NET、npm、pip、Composer、Yarn、pnpm、Cargo、RubyGems、Git、Docker、Kubernetes CLI、Terraform 等
+- **36+ 支持的工具**：全面检测包括：
+  - **运行时**：Node.js、Python、PHP、Java、Go、Rust、Ruby、.NET、Deno、Bun、Perl、Lua
+  - **包管理器**：npm、pip、Composer、Yarn、pnpm、Cargo、RubyGems、Homebrew、Chocolatey、Scoop、winget
+  - **云工具**：AWS CLI、Azure CLI、Google Cloud SDK、Helm、Ansible
+  - **版本管理器**：nvm、pyenv、rbenv、SDKMAN
+  - **开发工具**：Git、Docker、Kubernetes CLI、Terraform
 - **版本信息**：显示版本号和安装路径
 - **安装状态**：清晰的视觉指示器区分已安装和未安装的工具
 - **Windows 兼容**：特别处理 Windows Python 启动器（`py` 命令）
+- **可配置超时**：智能超时预设（快速/正常/慢速/扩展）确保可靠检测
+- **检测缓存**：5 分钟缓存提升性能，支持强制刷新选项
+- **检测摘要**：详细的摘要包含成功/失败计数和耗时信息
 
 ### 🤖 AI 助手（新功能！）
 - **本地分析**：免费、离线的智能分析，无需 API Key
@@ -104,9 +112,9 @@ Dev Janitor（开发清道夫）是一款功能强大的桌面应用程序，旨
 
 | 平台 | 下载 |
 |------|------|
-| Windows | `Dev-Janitor-Setup-1.2.0.exe` |
-| macOS | `Dev-Janitor-1.2.0.dmg` |
-| Linux | `Dev-Janitor-1.2.0.AppImage` |
+| Windows | `Dev-Janitor-Setup-1.4.0.exe` |
+| macOS | `Dev-Janitor-1.4.0.dmg` |
+| Linux | `Dev-Janitor-1.4.0.AppImage` |
 
 ### 从源码构建
 

@@ -2,11 +2,12 @@
  * Command Executor Module
  * 
  * Provides a unified interface for executing system commands with:
- * - Timeout handling
+ * - Timeout handling with presets
  * - Platform detection
- * - Error handling
+ * - Error handling with retry support
+ * - Fallback command support
  * 
- * Validates: Requirements 12.4, 12.5, 12.6
+ * Validates: Requirements 12.4, 12.5, 12.6, 1.1, 1.2, 1.4, 6.1
  */
 
 import { exec, ExecOptions } from 'child_process'
@@ -15,14 +16,90 @@ import { CommandResult } from '../shared/types'
 
 const execAsync = promisify(exec)
 
-// Default timeout for command execution (5 seconds)
-const DEFAULT_TIMEOUT = 5000
+/**
+ * Timeout presets for different command categories
+ * Validates: Requirement 1.4
+ */
+export enum TimeoutPreset {
+  /** Quick commands like version checks (10 seconds) */
+  QUICK = 10000,
+  /** Normal commands (30 seconds) - NEW DEFAULT */
+  NORMAL = 30000,
+  /** Slow commands like package listing (60 seconds) */
+  SLOW = 60000,
+  /** Extended timeout for very slow operations (120 seconds) */
+  EXTENDED = 120000,
+}
+
+// Default timeout for command execution (30 seconds - improved from 5s)
+const DEFAULT_TIMEOUT = TimeoutPreset.NORMAL
+
+/**
+ * Commands known to be slow and require extended timeout
+ */
+const SLOW_COMMANDS = [
+  'npm list',
+  'npm ls',
+  'pip list',
+  'pip3 list',
+  'py -m pip list',
+  'composer show',
+  'cargo install --list',
+  'gem list',
+]
+
+/**
+ * Get appropriate timeout for a command based on its characteristics
+ * Validates: Requirement 1.2
+ * 
+ * @param command The command to check
+ * @returns Appropriate timeout in milliseconds
+ */
+export function getTimeoutForCommand(command: string): number {
+  const lowerCommand = command.toLowerCase()
+
+  // Check if it's a known slow command
+  for (const slowCmd of SLOW_COMMANDS) {
+    if (lowerCommand.includes(slowCmd.toLowerCase())) {
+      return TimeoutPreset.SLOW
+    }
+  }
+
+  // Version commands are typically quick
+  if (lowerCommand.includes('--version') || lowerCommand.includes('-v')) {
+    return TimeoutPreset.QUICK
+  }
+
+  return TimeoutPreset.NORMAL
+}
 
 /**
  * Execution options for command executor
+ * Extended with retry and fallback support
  */
 export interface ExecutorOptions extends ExecOptions {
   timeout?: number
+  /** Number of times to retry on failure (default: 0) */
+  retryCount?: number
+  /** Alternative commands to try if primary fails */
+  fallbackCommands?: string[]
+  /** Whether to log errors (default: true) */
+  logOnError?: boolean
+  /** Use auto-detected timeout based on command type */
+  autoTimeout?: boolean
+}
+
+/**
+ * Extended command result with additional metadata
+ * Validates: Requirement 6.1
+ */
+export interface ExtendedCommandResult extends CommandResult {
+  /** Time taken to execute the command in milliseconds */
+  executionTime: number
+  /** The actual command that was executed (useful with fallbacks) */
+  commandUsed: string
+  /** Number of retries attempted */
+  retriesAttempted?: number
 }
 
 /**
@@ -86,10 +163,10 @@ export function getWhichCommand(toolName: string): string {
  */
 export function normalizePath(path: string): string {
   if (!path) return path
-  
+
   // Trim whitespace and newlines
   const trimmed = path.trim()
-  
+
   if (isWindows()) {
     // Windows paths use backslashes
     return trimmed.replace(/\//g, '\\')
@@ -110,8 +187,11 @@ export async function execute(
   command: string,
   options: ExecutorOptions = {}
 ): Promise<CommandResult> {
-  const timeout = options.timeout ?? DEFAULT_TIMEOUT
-  
+  // Use auto-detected timeout if autoTimeout is enabled, otherwise use provided or default
+  const timeout = options.autoTimeout
+    ? getTimeoutForCommand(command)
+    : (options.timeout ?? DEFAULT_TIMEOUT)
+
   try {
     const { stdout, stderr } = await execAsync(command, {
       ...options,
@@ -119,7 +199,7 @@ export async function execute(
       windowsHide: true, // Hide console window on Windows
       encoding: 'utf8', // Ensure string output
     })
-    
+
     return {
       stdout: (stdout as string) || '',
       stderr: (stderr as string) || '',
@@ -136,7 +216,7 @@ export async function execute(
       signal?: string
       message?: string
     }
-    
+
     // Check if it was a timeout
     if (execError.killed && execError.signal === 'SIGTERM') {
       return {
@@ -146,7 +226,7 @@ export async function execute(
         success: false,
       }
     }
-    
+
     // Return error result
     return {
       stdout: execError.stdout || '',
@@ -189,7 +269,7 @@ export async function executeSafe(command: string): Promise<CommandResult> {
 export async function getToolPath(toolName: string): Promise<string | null> {
   const command = getWhichCommand(toolName)
   const result = await executeSafe(command)
-  
+
   if (result.success && result.stdout) {
     // On Windows, 'where' may return multiple paths (one per line)
     // We take the first one
@@ -198,7 +278,7 @@ export async function getToolPath(toolName: string): Promise<string | null> {
       return normalizePath(paths[0])
     }
   }
-  
+
   return null
 }
 
@@ -212,7 +292,7 @@ export async function getToolPath(toolName: string): Promise<string | null> {
 export async function getAllToolPaths(toolName: string): Promise<string[]> {
   const command = getWhichCommand(toolName)
   const result = await executeSafe(command)
-  
+
   if (result.success && result.stdout) {
     return result.stdout
       .split('\n')
@@ -220,7 +300,7 @@ export async function getAllToolPaths(toolName: string): Promise<string[]> {
       .filter(p => p.length > 0)
       .map(normalizePath)
   }
-  
+
   return []
 }
 
@@ -229,11 +309,11 @@ export async function getAllToolPaths(toolName: string): Promise<string[]> {
  */
 export class CommandExecutor {
   private defaultTimeout: number
-  
+
   constructor(defaultTimeout: number = DEFAULT_TIMEOUT) {
     this.defaultTimeout = defaultTimeout
   }
-  
+
   /**
    * Execute a command
    */
@@ -243,42 +323,42 @@ export class CommandExecutor {
       ...options,
     })
   }
-  
+
   /**
    * Execute a command safely (never throws)
    */
   async executeSafe(command: string): Promise<CommandResult> {
     return executeSafe(command)
   }
-  
+
   /**
    * Get platform-specific command for finding tools
    */
   getPlatformCommand(command: string): string {
     return getWhichCommand(command)
   }
-  
+
   /**
    * Get the path of a tool
    */
   async getToolPath(toolName: string): Promise<string | null> {
     return getToolPath(toolName)
   }
-  
+
   /**
    * Get all paths of a tool
    */
   async getAllToolPaths(toolName: string): Promise<string[]> {
     return getAllToolPaths(toolName)
   }
-  
+
   /**
    * Get current platform
    */
   getPlatform(): Platform {
     return getPlatform()
   }
-  
+
   /**
    * Check if running on Windows
    */

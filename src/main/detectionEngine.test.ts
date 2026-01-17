@@ -136,13 +136,13 @@ describe('DetectionEngine', () => {
        */
       it('should return a valid ToolInfo structure', async () => {
         const result = await engine.detectNodeJS()
-        
+
         expect(result).toHaveProperty('name', 'node')
         expect(result).toHaveProperty('displayName', 'Node.js')
         expect(result).toHaveProperty('category', 'runtime')
         expect(result).toHaveProperty('isInstalled')
         expect(typeof result.isInstalled).toBe('boolean')
-        
+
         if (result.isInstalled) {
           expect(result.version).not.toBeNull()
           expect(result.path).not.toBeNull()
@@ -157,7 +157,7 @@ describe('DetectionEngine', () => {
        */
       it('should return a valid ToolInfo structure', async () => {
         const result = await engine.detectNpm()
-        
+
         expect(result).toHaveProperty('name', 'npm')
         expect(result).toHaveProperty('displayName', 'npm')
         expect(result).toHaveProperty('category', 'package-manager')
@@ -172,7 +172,7 @@ describe('DetectionEngine', () => {
        */
       it('should return a valid ToolInfo structure', async () => {
         const result = await engine.detectPython()
-        
+
         expect(result).toHaveProperty('name', 'python')
         expect(result).toHaveProperty('displayName', 'Python')
         expect(result).toHaveProperty('category', 'runtime')
@@ -187,7 +187,7 @@ describe('DetectionEngine', () => {
        */
       it('should return a valid ToolInfo structure', async () => {
         const result = await engine.detectPip()
-        
+
         expect(result).toHaveProperty('name', 'pip')
         expect(result).toHaveProperty('displayName', 'pip')
         expect(result).toHaveProperty('category', 'package-manager')
@@ -202,7 +202,7 @@ describe('DetectionEngine', () => {
        */
       it('should return a valid ToolInfo structure', async () => {
         const result = await engine.detectPHP()
-        
+
         expect(result).toHaveProperty('name', 'php')
         expect(result).toHaveProperty('displayName', 'PHP')
         expect(result).toHaveProperty('category', 'runtime')
@@ -217,7 +217,7 @@ describe('DetectionEngine', () => {
        */
       it('should return a valid ToolInfo structure', async () => {
         const result = await engine.detectComposer()
-        
+
         expect(result).toHaveProperty('name', 'composer')
         expect(result).toHaveProperty('displayName', 'Composer')
         expect(result).toHaveProperty('category', 'package-manager')
@@ -229,10 +229,10 @@ describe('DetectionEngine', () => {
       it('should route to correct detection method', async () => {
         const nodeResult = await engine.detectTool('node')
         expect(nodeResult.name).toBe('node')
-        
+
         const npmResult = await engine.detectTool('npm')
         expect(npmResult.name).toBe('npm')
-        
+
         const pythonResult = await engine.detectTool('python')
         expect(pythonResult.name).toBe('python')
       })
@@ -241,7 +241,7 @@ describe('DetectionEngine', () => {
         const result1 = await engine.detectTool('NODE')
         const result2 = await engine.detectTool('Node')
         const result3 = await engine.detectTool('node')
-        
+
         expect(result1.name).toBe('node')
         expect(result2.name).toBe('node')
         expect(result3.name).toBe('node')
@@ -264,10 +264,10 @@ describe('DetectionEngine', () => {
        */
       it('should return an array of ToolInfo objects', async () => {
         const results = await engine.detectAllTools()
-        
+
         expect(Array.isArray(results)).toBe(true)
-        expect(results.length).toBe(6) // Node, npm, Python, pip, PHP, Composer
-        
+        expect(results.length).toBe(36) // 12 runtimes + 11 package managers + 4 dev tools + 5 cloud tools + 4 version managers
+
         for (const tool of results) {
           expect(tool).toHaveProperty('name')
           expect(tool).toHaveProperty('displayName')
@@ -282,7 +282,7 @@ describe('DetectionEngine', () => {
         const startTime = Date.now()
         await engine.detectAllTools()
         const duration = Date.now() - startTime
-        
+
         // Parallel execution should be faster than sequential
         // 6 tools * 5s timeout = 30s sequential, should be much less in parallel
         expect(duration).toBeLessThan(15000)
@@ -292,7 +292,7 @@ describe('DetectionEngine', () => {
     describe('detectCustomTool', () => {
       it('should detect a custom tool with version flag', async () => {
         const result = await engine.detectCustomTool('git', 'Git', '--version')
-        
+
         expect(result.name).toBe('git')
         expect(result.displayName).toBe('Git')
         expect(result.category).toBe('tool')
@@ -307,7 +307,7 @@ describe('DetectionEngine', () => {
        */
       it('should handle non-existent tools gracefully', async () => {
         const result = await engine.detectCustomTool('nonexistent_tool_12345')
-        
+
         expect(result.isInstalled).toBe(false)
         expect(result.version).toBeNull()
         expect(result.path).toBeNull()
@@ -354,7 +354,7 @@ describe('DetectionEngine', () => {
      */
     it('Property 1: installed tools should have version and path', async () => {
       const tools = await engine.detectAllTools()
-      
+
       for (const tool of tools) {
         if (tool.isInstalled) {
           expect(tool.version).not.toBeNull()
@@ -372,7 +372,7 @@ describe('DetectionEngine', () => {
      */
     it('Property 2: unavailable tools should be marked as not installed', async () => {
       const tools = await engine.detectAllTools()
-      
+
       for (const tool of tools) {
         if (!tool.isInstalled) {
           expect(tool.version).toBeNull()
@@ -391,7 +391,7 @@ describe('DetectionEngine', () => {
     it('Property 7: all tools should have exactly one category', async () => {
       const tools = await engine.detectAllTools()
       const validCategories = ['runtime', 'package-manager', 'tool', 'other']
-      
+
       for (const tool of tools) {
         expect(validCategories).toContain(tool.category)
       }

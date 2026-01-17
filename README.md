@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.3.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.4.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT%20with%20Commons%20Clause-green.svg" alt="License">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg" alt="Platform">
   <img src="https://img.shields.io/badge/electron-33.3.1-9feaf9.svg" alt="Electron">
@@ -35,10 +35,18 @@ Dev Janitor is a powerful desktop application designed to help developers detect
 
 ### 🔍 Tool Detection
 - **Automatic Detection**: Automatically scans and detects installed development tools
-- **Supported Tools**: Node.js, Python, PHP, Java, Go, Rust, Ruby, .NET, npm, pip, Composer, Yarn, pnpm, Cargo, RubyGems, Git, Docker, Kubernetes CLI, Terraform, and more
+- **36+ Supported Tools**: Comprehensive detection including:
+  - **Runtimes**: Node.js, Python, PHP, Java, Go, Rust, Ruby, .NET, Deno, Bun, Perl, Lua
+  - **Package Managers**: npm, pip, Composer, Yarn, pnpm, Cargo, RubyGems, Homebrew, Chocolatey, Scoop, winget
+  - **Cloud Tools**: AWS CLI, Azure CLI, Google Cloud SDK, Helm, Ansible
+  - **Version Managers**: nvm, pyenv, rbenv, SDKMAN
+  - **Dev Tools**: Git, Docker, Kubernetes CLI, Terraform
 - **Version Information**: Displays version numbers and installation paths
 - **Installation Status**: Clear visual indicators for installed vs unavailable tools
 - **Windows Compatibility**: Special handling for Windows Python Launcher (`py` command)
+- **Configurable Timeouts**: Smart timeout presets (Quick/Normal/Slow/Extended) for reliable detection
+- **Detection Caching**: 5-minute cache for improved performance with force-refresh option
+- **Detection Summary**: Detailed summary with success/failure counts and timing information
 
 ### 🤖 AI Assistant (NEW!)
 - **Local Analysis**: Free, offline intelligent analysis without API key
@@ -104,9 +112,9 @@ Download the latest release for your platform from the [Releases](https://github
 
 | Platform | Download |
 |----------|----------|
-| Windows | `Dev-Janitor-Setup-1.3.0.exe` |
-| macOS | `Dev-Janitor-1.3.0.dmg` |
-| Linux | `Dev-Janitor-1.3.0.AppImage` |
+| Windows | `Dev-Janitor-Setup-1.4.0.exe` |
+| macOS | `Dev-Janitor-1.4.0.dmg` |
+| Linux | `Dev-Janitor-1.4.0.AppImage` |
 
 ### Build from Source
 

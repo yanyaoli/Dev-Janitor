@@ -6,11 +6,74 @@
  * - pip (Python packages)
  * - composer (PHP packages)
  * 
- * Validates: Requirements 3.1, 3.2, 4.1, 4.2
+ * Validates: Requirements 3.1, 3.2, 4.1, 4.2, 4.3
  */
 
 import { PackageInfo } from '../shared/types'
 import { executeSafe, isWindows } from './commandExecutor'
+
+/**
+ * Pip command cache interface
+ * Validates: Requirement 4.3 - Cache successful pip command
+ */
+interface PipCommandCache {
+  command: string | null
+  timestamp: number
+  ttl: number // Time-to-live in milliseconds
+}
+
+/**
+ * Cached pip command that was successfully used
+ */
+let pipCommandCache: PipCommandCache = {
+  command: null,
+  timestamp: 0,
+  ttl: 5 * 60 * 1000, // 5 minutes cache
+}
+
+/**
+ * Get the working pip command (from cache or by trying all variants)
+ * Validates: Requirement 4.1, 4.2, 4.3
+ * 
+ * @returns The working pip command or null if none found
+ */
+export async function getWorkingPipCommand(): Promise<string | null> {
+  // Check if cache is still valid
+  if (pipCommandCache.command &&
+    Date.now() - pipCommandCache.timestamp < pipCommandCache.ttl) {
+    return pipCommandCache.command
+  }
+
+  // Priority order:
+  // Windows: py -m pip (most reliable), pip3, pip
+  // Unix: pip3, pip
+  const commands = isWindows()
+    ? ['py -m pip', 'pip3', 'pip']
+    : ['pip3', 'pip']
+
+  for (const cmd of commands) {
+    const result = await executeSafe(`${cmd} --version`)
+    if (result.success) {
+      // Cache the working command
+      pipCommandCache = {
+        command: cmd,
+        timestamp: Date.now(),
+        ttl: pipCommandCache.ttl,
+      }
+      return cmd
+    }
+  }
+
+  return null
+}
+
+/**
+ * Invalidate the pip command cache
+ */
+export function invalidatePipCommandCache(): void {
+  pipCommandCache.command = null
+  pipCommandCache.timestamp = 0
+}
 
 /**
  * npm package list JSON structure
@@ -43,22 +106,99 @@ interface ComposerPackage {
 }
 
 /**
- * Parse npm list JSON output
+ * Parse npm text output for Windows (ASCII tree characters: +-- \--)
+ * Validates: Requirement 3.1
+ * 
+ * @param output The text output from npm list
+ * @returns Array of PackageInfo
+ */
+export function parseNpmTextWindows(output: string): PackageInfo[] {
+  const packages: PackageInfo[] = []
+  const lines = output.split('\n')
+
+  // Windows npm list uses ASCII tree characters: +-- or \-- or `--
+  const packageRegex = /[+`\\]-- (.+)@(.+)/
+
+  for (const line of lines) {
+    const match = line.match(packageRegex)
+    if (match) {
+      packages.push({
+        name: match[1].trim(),
+        version: match[2].trim(),
+        location: 'global',
+        manager: 'npm',
+      })
+    }
+  }
+
+  return packages
+}
+
+/**
+ * Parse npm text output for Unix (Unicode tree characters: ├── └──)
+ * Validates: Requirement 3.2
+ * 
+ * @param output The text output from npm list
+ * @returns Array of PackageInfo
+ */
+export function parseNpmTextUnix(output: string): PackageInfo[] {
+  const packages: PackageInfo[] = []
+  const lines = output.split('\n')
+
+  // Unix npm list uses Unicode tree characters: ├── or └──
+  const packageRegex = /[├└]── (.+)@(.+)/
+
+  for (const line of lines) {
+    const match = line.match(packageRegex)
+    if (match) {
+      packages.push({
+        name: match[1].trim(),
+        version: match[2].trim(),
+        location: 'global',
+        manager: 'npm',
+      })
+    }
+  }
+
+  return packages
+}
+
+/**
+ * Parse result metadata for npm output parsing
+ */
+export interface NpmParseResult {
+  packages: PackageInfo[]
+  method: 'json' | 'text-windows' | 'text-unix' | 'text-fallback'
+}
+
+/**
+ * Parse npm list JSON output with enhanced fallback parsing
  * 
  * Property 6: Package List Parsing
+ * Validates: Requirements 3.1, 3.2, 3.3, 3.4
  * @param output The JSON output from npm list
  * @returns Array of PackageInfo
  */
 export function parseNpmOutput(output: string): PackageInfo[] {
-  const packages: PackageInfo[] = []
-  
+  return parseNpmOutputWithResult(output).packages
+}
+
+/**
+ * Parse npm list output with parsing method information
+ * 
+ * @param output The output from npm list
+ * @returns NpmParseResult with packages and parsing method used
+ */
+export function parseNpmOutputWithResult(output: string): NpmParseResult {
   if (!output || typeof output !== 'string') {
-    return packages
+    return { packages: [], method: 'json' }
   }
-  
+
+  // First, try JSON parsing
   try {
     const data: NpmListOutput = JSON.parse(output)
-    
+
+    const packages: PackageInfo[] = []
     if (data.dependencies) {
       for (const [name, info] of Object.entries(data.dependencies)) {
         packages.push({
@@ -69,26 +209,42 @@ export function parseNpmOutput(output: string): PackageInfo[] {
         })
       }
     }
+    return { packages, method: 'json' }
   } catch {
-    // JSON parsing failed, try to extract info from text output
-    // npm list output format: "├── package@version"
+    // JSON parsing failed, try text parsing based on platform
+
+    // Try Windows ASCII format first
+    const windowsPackages = parseNpmTextWindows(output)
+    if (windowsPackages.length > 0) {
+      return { packages: windowsPackages, method: 'text-windows' }
+    }
+
+    // Try Unix Unicode format
+    const unixPackages = parseNpmTextUnix(output)
+    if (unixPackages.length > 0) {
+      return { packages: unixPackages, method: 'text-unix' }
+    }
+
+    // Fallback: try a more generic regex that handles both formats
+    const packages: PackageInfo[] = []
     const lines = output.split('\n')
-    const packageRegex = /[├└]── (.+)@(.+)/
-    
+    // Match any line that ends with package@version pattern
+    const genericRegex = /\s(.+)@(\d+\.\d+\.\d+(?:-[\w.]+)?)\s*$/
+
     for (const line of lines) {
-      const match = line.match(packageRegex)
+      const match = line.match(genericRegex)
       if (match) {
         packages.push({
-          name: match[1],
-          version: match[2],
+          name: match[1].trim(),
+          version: match[2].trim(),
           location: 'global',
           manager: 'npm',
         })
       }
     }
+
+    return { packages, method: 'text-fallback' }
   }
-  
-  return packages
 }
 
 /**
@@ -100,14 +256,14 @@ export function parseNpmOutput(output: string): PackageInfo[] {
  */
 export function parsePipOutput(output: string): PackageInfo[] {
   const packages: PackageInfo[] = []
-  
+
   if (!output || typeof output !== 'string') {
     return packages
   }
-  
+
   try {
     const data: PipPackage[] = JSON.parse(output)
-    
+
     for (const pkg of data) {
       packages.push({
         name: pkg.name,
@@ -120,7 +276,7 @@ export function parsePipOutput(output: string): PackageInfo[] {
     // JSON parsing failed, try to extract from text output
     // pip list output format: "package    version"
     const lines = output.split('\n')
-    
+
     // Skip header lines
     let startIndex = 0
     for (let i = 0; i < lines.length; i++) {
@@ -129,11 +285,11 @@ export function parsePipOutput(output: string): PackageInfo[] {
         break
       }
     }
-    
+
     for (let i = startIndex; i < lines.length; i++) {
       const line = lines[i].trim()
       if (!line) continue
-      
+
       const parts = line.split(/\s+/)
       if (parts.length >= 2) {
         packages.push({
@@ -145,7 +301,7 @@ export function parsePipOutput(output: string): PackageInfo[] {
       }
     }
   }
-  
+
   return packages
 }
 
@@ -158,15 +314,15 @@ export function parsePipOutput(output: string): PackageInfo[] {
  */
 export function parseComposerOutput(output: string): PackageInfo[] {
   const packages: PackageInfo[] = []
-  
+
   if (!output || typeof output !== 'string') {
     return packages
   }
-  
+
   try {
     // Try JSON format first
     const data = JSON.parse(output)
-    
+
     if (Array.isArray(data)) {
       for (const pkg of data as ComposerPackage[]) {
         packages.push({
@@ -195,11 +351,11 @@ export function parseComposerOutput(output: string): PackageInfo[] {
     // JSON parsing failed, try text format
     // composer global show output: "vendor/package version description"
     const lines = output.split('\n')
-    
+
     for (const line of lines) {
       const trimmed = line.trim()
       if (!trimmed) continue
-      
+
       // Match pattern: vendor/package vX.Y.Z description
       const match = trimmed.match(/^([\w-]+\/[\w-]+)\s+(v?[\d.]+(?:-[\w.]+)?)\s*(.*)$/)
       if (match) {
@@ -213,7 +369,7 @@ export function parseComposerOutput(output: string): PackageInfo[] {
       }
     }
   }
-  
+
   return packages
 }
 
@@ -227,11 +383,11 @@ export function parseComposerOutput(output: string): PackageInfo[] {
  */
 export async function listNpmPackages(): Promise<PackageInfo[]> {
   const result = await executeSafe('npm list -g --depth=0 --json')
-  
+
   if (!result.success && !result.stdout) {
     return []
   }
-  
+
   // npm may return non-zero exit code but still have valid output
   return parseNpmOutput(result.stdout)
 }
@@ -240,24 +396,44 @@ export async function listNpmPackages(): Promise<PackageInfo[]> {
  * List installed pip packages
  * 
  * Property 5: Package Information Completeness
- * Validates: Requirements 4.1, 4.2
+ * Validates: Requirements 4.1, 4.2, 4.3
  * @returns Promise resolving to array of PackageInfo
  */
 export async function listPipPackages(): Promise<PackageInfo[]> {
-  // Try different pip commands based on platform
-  // Windows: pip, pip3, py -m pip
-  // Unix: pip3, pip
-  const commands = isWindows()
-    ? ['pip list --format=json', 'pip3 list --format=json', 'py -m pip list --format=json']
-    : ['pip3 list --format=json', 'pip list --format=json']
-  
-  for (const cmd of commands) {
-    const result = await executeSafe(cmd)
+  // Try to use cached working pip command
+  const pipCmd = await getWorkingPipCommand()
+
+  if (pipCmd) {
+    const result = await executeSafe(`${pipCmd} list --format=json`)
     if (result.success && result.stdout) {
       return parsePipOutput(result.stdout)
     }
   }
-  
+
+  // If cached command failed, try all commands
+  invalidatePipCommandCache()
+
+  // Priority order:
+  // Windows: py -m pip (most reliable), pip3, pip
+  // Unix: pip3, pip
+  const commands = isWindows()
+    ? ['py -m pip list --format=json', 'pip3 list --format=json', 'pip list --format=json']
+    : ['pip3 list --format=json', 'pip list --format=json']
+
+  for (const cmd of commands) {
+    const result = await executeSafe(cmd)
+    if (result.success && result.stdout) {
+      // Update cache with working command (extract base command)
+      const baseCmd = cmd.replace(' list --format=json', '')
+      pipCommandCache = {
+        command: baseCmd,
+        timestamp: Date.now(),
+        ttl: pipCommandCache.ttl,
+      }
+      return parsePipOutput(result.stdout)
+    }
+  }
+
   return []
 }
 
@@ -269,7 +445,7 @@ export async function listPipPackages(): Promise<PackageInfo[]> {
  */
 export async function listComposerPackages(): Promise<PackageInfo[]> {
   const result = await executeSafe('composer global show --format=json')
-  
+
   if (!result.success && !result.stdout) {
     // Try without --format=json for older versions
     const textResult = await executeSafe('composer global show')
@@ -278,7 +454,7 @@ export async function listComposerPackages(): Promise<PackageInfo[]> {
     }
     return []
   }
-  
+
   return parseComposerOutput(result.stdout)
 }
 
@@ -289,18 +465,18 @@ export async function listComposerPackages(): Promise<PackageInfo[]> {
  */
 export async function listCargoPackages(): Promise<PackageInfo[]> {
   const result = await executeSafe('cargo install --list')
-  
+
   if (!result.success || !result.stdout) {
     return []
   }
-  
+
   const packages: PackageInfo[] = []
   const lines = result.stdout.split('\n')
-  
+
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith(' ')) continue
-    
+
     // Format: "package-name v1.2.3:"
     const match = trimmed.match(/^(.+?)\s+v?([\d.]+):?/)
     if (match) {
@@ -312,7 +488,7 @@ export async function listCargoPackages(): Promise<PackageInfo[]> {
       })
     }
   }
-  
+
   return packages
 }
 
@@ -323,18 +499,18 @@ export async function listCargoPackages(): Promise<PackageInfo[]> {
  */
 export async function listGemPackages(): Promise<PackageInfo[]> {
   const result = await executeSafe('gem list --local')
-  
+
   if (!result.success || !result.stdout) {
     return []
   }
-  
+
   const packages: PackageInfo[] = []
   const lines = result.stdout.split('\n')
-  
+
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed) continue
-    
+
     // Format: "package-name (1.2.3, 1.2.2)"
     const match = trimmed.match(/^(.+?)\s+\(([\d.]+)/)
     if (match) {
@@ -346,7 +522,7 @@ export async function listGemPackages(): Promise<PackageInfo[]> {
       })
     }
   }
-  
+
   return packages
 }
 
@@ -362,7 +538,7 @@ export async function uninstallPackage(
   manager: 'npm' | 'pip' | 'composer' | 'cargo' | 'gem'
 ): Promise<boolean> {
   let command: string
-  
+
   switch (manager) {
     case 'npm':
       command = `npm uninstall -g ${packageName}`
@@ -387,7 +563,7 @@ export async function uninstallPackage(
     default:
       return false
   }
-  
+
   const result = await executeSafe(command)
   return result.success
 }
@@ -404,7 +580,7 @@ export async function updatePackage(
   manager: 'npm' | 'pip'
 ): Promise<{ success: boolean; newVersion?: string; error?: string }> {
   let command: string
-  
+
   switch (manager) {
     case 'npm':
       command = `npm update -g ${packageName}`
@@ -417,9 +593,9 @@ export async function updatePackage(
           // Get the new version after update
           const versionResult = await executeSafe(`py -m pip show ${packageName}`)
           const versionMatch = versionResult.stdout.match(/Version:\s*(.+)/i)
-          return { 
-            success: true, 
-            newVersion: versionMatch ? versionMatch[1].trim() : undefined 
+          return {
+            success: true,
+            newVersion: versionMatch ? versionMatch[1].trim() : undefined
           }
         }
       }
@@ -428,13 +604,13 @@ export async function updatePackage(
     default:
       return { success: false, error: 'Unsupported package manager for update' }
   }
-  
+
   const result = await executeSafe(command)
-  
+
   if (!result.success) {
     return { success: false, error: result.stderr || 'Update failed' }
   }
-  
+
   // Get the new version after update
   let newVersion: string | undefined
   if (manager === 'npm') {
@@ -450,7 +626,7 @@ export async function updatePackage(
     const versionMatch = versionResult.stdout.match(/Version:\s*(.+)/i)
     newVersion = versionMatch ? versionMatch[1].trim() : undefined
   }
-  
+
   return { success: true, newVersion }
 }
 
@@ -464,7 +640,7 @@ export async function getGlobalPath(
   manager: 'npm' | 'pip' | 'composer' | 'cargo' | 'gem'
 ): Promise<string | null> {
   let command: string
-  
+
   switch (manager) {
     case 'npm':
       command = 'npm root -g'
@@ -496,13 +672,13 @@ export async function getGlobalPath(
     default:
       return null
   }
-  
+
   const result = await executeSafe(command)
-  
+
   if (result.success && result.stdout) {
     return result.stdout.trim()
   }
-  
+
   return null
 }
 
@@ -516,7 +692,7 @@ export async function isPackageManagerAvailable(
   manager: 'npm' | 'pip' | 'composer' | 'cargo' | 'gem'
 ): Promise<boolean> {
   let commands: string[]
-  
+
   switch (manager) {
     case 'npm':
       commands = ['npm --version']
@@ -539,12 +715,12 @@ export async function isPackageManagerAvailable(
     default:
       return false
   }
-  
+
   for (const cmd of commands) {
     const result = await executeSafe(cmd)
     if (result.success) return true
   }
-  
+
   return false
 }
 
@@ -558,35 +734,35 @@ export class PackageManager {
   async listNpmPackages(): Promise<PackageInfo[]> {
     return listNpmPackages()
   }
-  
+
   /**
    * List pip packages
    */
   async listPipPackages(): Promise<PackageInfo[]> {
     return listPipPackages()
   }
-  
+
   /**
    * List composer global packages
    */
   async listComposerPackages(): Promise<PackageInfo[]> {
     return listComposerPackages()
   }
-  
+
   /**
    * List cargo packages
    */
   async listCargoPackages(): Promise<PackageInfo[]> {
     return listCargoPackages()
   }
-  
+
   /**
    * List gem packages
    */
   async listGemPackages(): Promise<PackageInfo[]> {
     return listGemPackages()
   }
-  
+
   /**
    * Uninstall a package
    */
@@ -596,7 +772,7 @@ export class PackageManager {
   ): Promise<boolean> {
     return uninstallPackage(packageName, manager)
   }
-  
+
   /**
    * Update a package to the latest version
    */
@@ -606,14 +782,14 @@ export class PackageManager {
   ): Promise<{ success: boolean; newVersion?: string; error?: string }> {
     return updatePackage(packageName, manager)
   }
-  
+
   /**
    * Get global installation path
    */
   async getGlobalPath(manager: 'npm' | 'pip' | 'composer' | 'cargo' | 'gem'): Promise<string | null> {
     return getGlobalPath(manager)
   }
-  
+
   /**
    * Check if package manager is available
    */
@@ -622,21 +798,21 @@ export class PackageManager {
   ): Promise<boolean> {
     return isPackageManagerAvailable(manager)
   }
-  
+
   /**
    * Parse npm output
    */
   parseNpmOutput(output: string): PackageInfo[] {
     return parseNpmOutput(output)
   }
-  
+
   /**
    * Parse pip output
    */
   parsePipOutput(output: string): PackageInfo[] {
     return parsePipOutput(output)
   }
-  
+
   /**
    * Parse composer output
    */

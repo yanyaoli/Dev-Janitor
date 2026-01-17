@@ -25,6 +25,10 @@ export interface ToolInfo {
   installMethod?: 'npm' | 'pip' | 'homebrew' | 'apt' | 'chocolatey' | 'manual'
   icon?: string             // Icon identifier
   category: 'runtime' | 'package-manager' | 'tool' | 'other'
+  // Enhanced diagnostic fields (Task 11, Requirement 6.2)
+  errorReason?: string      // Reason for detection failure (if any)
+  detectionMethod?: 'primary' | 'fallback' | 'path-search' // How the tool was detected
+  detectionTime?: number    // Time taken to detect in milliseconds
 }
 
 // Package Information Model
@@ -62,10 +66,28 @@ export interface CommandResult {
   stderr: string
   exitCode: number
   success: boolean
+  // Enhanced diagnostic fields (Task 11, Requirement 6.1)
+  executionTime?: number    // Time taken to execute in milliseconds
+  commandUsed?: string      // The actual command that was executed (useful with fallbacks)
+}
+
+/**
+ * Detection summary for batch tool detection
+ * Validates: Requirement 6.3
+ */
+export interface DetectionSummary {
+  totalTools: number        // Total number of tools detected
+  successCount: number      // Number of tools successfully detected
+  failureCount: number      // Number of tools that failed to detect
+  totalTime: number         // Total detection time in milliseconds
+  errors: Array<{           // List of detection errors
+    toolName: string
+    errorReason: string
+  }>
 }
 
 // IPC Channel Types
-export type IPCChannels = 
+export type IPCChannels =
   | 'tools:detect-all'
   | 'tools:detect-one'
   | 'packages:list-npm'

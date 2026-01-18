@@ -148,7 +148,21 @@ const PackagesView: React.FC = () => {
 
   // Render content based on manager installation status
   const renderContent = () => {
-    // Error state
+    // 如果正在加载包列表，始终显示 Table（Table 内部有自己的 loading 状态处理）
+    // 这样可以避免在加载过程中因为 tools 还没准备好而跳到 "未安装" 页面
+    if (packagesLoading) {
+      return (
+        <PackageTable
+          packages={filteredPackages}
+          loading={true}
+          onUninstall={handleUninstall}
+          onRefresh={handleRefresh}
+          manager={activeTab}
+        />
+      )
+    }
+
+    // 错误处理
     if (packagesError) {
       return (
         <Alert
@@ -157,10 +171,7 @@ const PackagesView: React.FC = () => {
           type="error"
           showIcon
           action={
-            <button
-              onClick={handleRefresh}
-              className="text-blue-500 hover:text-blue-700"
-            >
+            <button onClick={handleRefresh} className="text-blue-500 hover:text-blue-700">
               {t('common.retry')}
             </button>
           }
@@ -168,8 +179,10 @@ const PackagesView: React.FC = () => {
       )
     }
 
-    // Manager not installed - Validates: Requirements 3.4, 4.4
-    if (!isCurrentManagerInstalled() && !packagesLoading) {
+    // 只有在确定加载完成，且 tools 列表不为空，且找不到对应管理器时，才提示未安装
+    // 增加 tools.length > 0 的判断，防止 tools 还在初始化时误判
+    const hasToolsData = tools && tools.length > 0;
+    if (hasToolsData && !isCurrentManagerInstalled()) {
       const managerName = activeTab.toUpperCase()
       return (
         <Empty
@@ -182,11 +195,11 @@ const PackagesView: React.FC = () => {
       )
     }
 
-    // Package table
+    // 正常显示
     return (
       <PackageTable
         packages={filteredPackages}
-        loading={packagesLoading}
+        loading={false}
         onUninstall={handleUninstall}
         onRefresh={handleRefresh}
         manager={activeTab}

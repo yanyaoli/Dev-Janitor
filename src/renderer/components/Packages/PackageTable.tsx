@@ -135,21 +135,33 @@ const PackageTable: React.FC<PackageTableProps> = ({
   // Update a single package
   const checkVersion = useCallback(async (packageName: string) => {
     if (manager !== 'npm' && manager !== 'pip') return;
-    
-    // 标记为“检查中”
-    updatePackageVersionInfo(packageName, { latest: '', checking: true, checked: false })
-    
-    try {
-      const result = manager === 'npm' 
-        ? await window.electronAPI.packages.checkNpmLatestVersion(packageName) 
-        : await window.electronAPI.packages.checkPipLatestVersion(packageName);
-      
-      updatePackageVersionInfo(packageName, { 
-        latest: result?.latest || t('common.unknown'), 
-        checking: false, 
-        checked: true 
+
+    // 防御性检查：确保 electronAPI.packages 存在
+    if (!window.electronAPI?.packages) {
+      console.error('Packages API not available')
+      updatePackageVersionInfo(packageName, {
+        latest: t('packages.checkFailed', 'Check failed'),
+        checking: false,
+        checked: true
       })
-    } catch {
+      return
+    }
+
+    // 标记为"检查中"
+    updatePackageVersionInfo(packageName, { latest: '', checking: true, checked: false })
+
+    try {
+      const result = manager === 'npm'
+        ? await window.electronAPI.packages.checkNpmLatestVersion(packageName)
+        : await window.electronAPI.packages.checkPipLatestVersion(packageName);
+
+      updatePackageVersionInfo(packageName, {
+        latest: result?.latest || t('common.unknown'),
+        checking: false,
+        checked: true
+      })
+    } catch (error) {
+      console.error(`Failed to check version for ${packageName}:`, error)
       updatePackageVersionInfo(packageName, { latest: 'error', checking: false, checked: true })
     }
   }, [manager, t, updatePackageVersionInfo])
@@ -157,7 +169,13 @@ const PackageTable: React.FC<PackageTableProps> = ({
 
   const handleUpdatePackage = useCallback(async (packageName: string) => {
     if (manager !== 'npm' && manager !== 'pip') return;
-    
+
+    // 防御性检查：确保 electronAPI.packages 存在
+    if (!window.electronAPI?.packages?.update) {
+      message.error(t('packages.updateFailed'))
+      return
+    }
+
     updatePackageVersionInfo(packageName, { updating: true })
     try {
       const result = await window.electronAPI.packages.update(packageName, manager)
@@ -168,7 +186,8 @@ const PackageTable: React.FC<PackageTableProps> = ({
       } else {
         message.error(result.error || t('packages.updateFailed'))
       }
-    } catch {
+    } catch (error) {
+      console.error(`Failed to update package ${packageName}:`, error)
       message.error(t('packages.updateFailed'))
     } finally {
       updatePackageVersionInfo(packageName, { updating: false })
@@ -198,6 +217,8 @@ const PackageTable: React.FC<PackageTableProps> = ({
         if (!pkg) break;
         try {
           await checkVersion(pkg.name);
+          // 添加小延迟避免触发 API 速率限制
+          await new Promise(resolve => setTimeout(resolve, 100));
         } finally {
           completedCount++;
           setCheckProgress(prev => prev ? { ...prev, completed: completedCount } : null);
@@ -219,8 +240,8 @@ const PackageTable: React.FC<PackageTableProps> = ({
       if (signal.aborted) {
         setCheckProgress(prev => prev ? { ...prev, cancelled: true } : null);
       }
-      // 任务结束后 1 秒自动隐藏进度条
-      setTimeout(() => setCheckProgress(null), 1000);
+      // 任务结束后 2 秒自动隐藏进度条
+      setTimeout(() => setCheckProgress(null), 2000);
       abortControllerRef.current = null;
     }
   }, [manager, packages, checkVersion]);

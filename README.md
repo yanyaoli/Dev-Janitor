@@ -445,5 +445,5 @@ For commercial licensing inquiries or other questions, please contact us at:
 ---
 
 <p align="center">
-  Made with ❤️ by developers, for developers
+  Made with ❤️ 
 </p>

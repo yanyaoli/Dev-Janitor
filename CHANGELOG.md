@@ -26,14 +26,20 @@ All notable changes to Dev Janitor will be documented in this file.
 - **属性测试**: 为所有新包处理器添加了全面的属性测试
 
 ### Fixed / 修复
-- **macOS nvm detection**: Fixed nvm detection on macOS/Linux where nvm is a shell script, not a binary (PR #29, thanks @webliuxiang)
-- **macOS nvm 检测**: 修复 macOS/Linux 上 nvm 检测问题，nvm 是 shell 脚本而非二进制文件 (PR #29, 感谢 @webliuxiang)
-- **AI CLI detection on macOS**: Improved AI CLI tool detection to not require npm list check, supporting alternative installation methods (PR #29)
-- **macOS AI CLI 检测**: 改进 AI CLI 工具检测，不再强制要求 npm list 检查，支持其他安装方式 (PR #29)
+- **macOS nvm detection**: Fixed nvm detection on macOS/Linux where nvm is a shell script, not a binary (PR #29, thanks @webliuxiang) - Fixes #28
+- **macOS nvm 检测**: 修复 macOS/Linux 上 nvm 检测问题，nvm 是 shell 脚本而非二进制文件 (PR #29, 感谢 @webliuxiang) - 修复 #28
+- **AI CLI detection on macOS**: Improved AI CLI tool detection to not require npm list check, supporting alternative installation methods (PR #29) - Fixes #28
+- **macOS AI CLI 检测**: 改进 AI CLI 工具检测，不再强制要求 npm list 检查，支持其他安装方式 (PR #29) - 修复 #28
 - **Enhanced npm package uninstall**: Added `--force` flag, npm cache cleanup, and verification to ensure complete package removal
 - **增强 npm 包卸载**: 添加 `--force` 标志、npm 缓存清理和验证机制，确保包被完全删除
 - **AI Cleanup algorithm**: Improved junk file detection with whitelist mechanism to avoid false positives (audio, video, documents are now safe)
 - **AI 垃圾清理算法**: 改进垃圾文件检测算法，添加白名单机制避免误删（音频、视频、文档等文件现在安全）
+
+### Known Issues / 已知问题
+- **Windows multi-Python detection**: Currently only detects one Python version. Multi-version detection (conda, pyenv, etc.) will be improved in future releases - See #30
+- **Windows 多 Python 检测**: 目前只能检测到一个 Python 版本。多版本检测（conda、pyenv 等）将在后续版本中改进 - 见 #30
+- **macOS tool detection**: Some tools (golang, .net, java, homebrew) are not yet detected on macOS - See #28
+- **macOS 工具检测**: 部分工具（golang、.net、java、homebrew）在 macOS 上尚未支持检测 - 见 #28
 
 ---
 

@@ -337,13 +337,13 @@ describe('PathScanner', () => {
       expect(Array.isArray(paths)).toBe(true)
     })
 
-    it('should scan directories', () => {
-      const result = scanner.scanDirectory('/nonexistent')
+    it('should scan directories', async () => {
+      const result = await scanner.scanDirectory('/nonexistent')
       expect(Array.isArray(result)).toBe(true)
     })
 
-    it('should scan all PATH directories', () => {
-      const result = scanner.scanAllPathDirectories()
+    it('should scan all PATH directories', async () => {
+      const result = await scanner.scanAllPathDirectories()
       expect(Array.isArray(result)).toBe(true)
     })
 

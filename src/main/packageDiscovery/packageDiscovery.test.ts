@@ -19,7 +19,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import * as fc from 'fast-check'
 import { PackageDiscovery } from './packageDiscovery'
 import { PathCache } from './pathCache'
-import { PackageManagerType } from '../../shared/types'
+import { PackageManagerType, PackageInfo } from '../../shared/types'
 import * as commandExecutor from '../commandExecutor'
 
 describe('PackageDiscovery', () => {
@@ -359,46 +359,17 @@ describe('PackageDiscovery', () => {
       const freshCache = new PathCache()
       const freshDiscovery = new PackageDiscovery(freshCache)
       
-      // Mock brew as available - need to handle all commands that TieredPathSearch might call
-      vi.spyOn(commandExecutor, 'executeSafe').mockImplementation(async (command: string) => {
-        // Tier 1: Direct command check for brew
-        if (command === 'brew --version') {
-          return {
-            success: true,
-            stdout: 'brew 4.0.0',
-            stderr: '',
-            exitCode: 0
-          }
-        }
-        
-        // List formulas
-        if (command === 'brew list --versions') {
-          return {
-            success: true,
-            stdout: 'node 18.0.0\nnpm 9.0.0',
-            stderr: '',
-            exitCode: 0
-          }
-        }
-        
-        // List casks
-        if (command === 'brew list --cask --versions') {
-          return {
-            success: true,
-            stdout: 'visual-studio-code 1.80.0',
-            stderr: '',
-            exitCode: 0
-          }
-        }
-        
-        // All other commands fail (other package managers)
-        return {
-          success: false,
-          stdout: '',
-          stderr: 'not found',
-          exitCode: 127
-        }
-      })
+      const samplePackages: PackageInfo[] = [
+        { name: 'node', version: '18.0.0', location: 'formula', manager: 'brew' },
+        { name: 'visual-studio-code', version: '1.80.0', location: 'cask', manager: 'brew' },
+      ]
+
+      vi.spyOn(freshDiscovery, 'discoverAvailableManagers').mockResolvedValue([
+        { manager: 'brew', status: 'available', inPath: true }
+      ])
+      vi.spyOn(freshDiscovery, 'listPackages').mockImplementation(async (manager: PackageManagerType) => (
+        manager === 'brew' ? samplePackages : []
+      ))
 
       const packages = await freshDiscovery.listAllPackages()
 

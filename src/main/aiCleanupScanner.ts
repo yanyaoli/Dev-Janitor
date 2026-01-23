@@ -90,25 +90,81 @@ interface JunkPattern {
   isExactMatch?: boolean
 }
 
+type JunkMatchInfo = Pick<JunkPattern, 'source' | 'description' | 'descriptionZh' | 'riskLevel'>
+
+const AI_TOOL_KEYWORDS = [
+  'aider',
+  'claude',
+  'cursor',
+  'windsurf',
+  'codeium',
+  'copilot',
+  'continue',
+  'kiro',
+  'openai',
+  'anthropic',
+  'tabnine',
+  'codex',
+  'gemini',
+]
+const AI_TOOL_KEYWORD_SET = new Set(AI_TOOL_KEYWORDS)
+
+const AI_TOOL_SOURCE_MAP: Record<string, string> = {
+  aider: 'Aider',
+  claude: 'Claude',
+  cursor: 'Cursor',
+  windsurf: 'Codeium/Windsurf',
+  codeium: 'Codeium/Windsurf',
+  copilot: 'GitHub Copilot',
+  continue: 'Continue',
+  kiro: 'Kiro',
+  anthropic: 'Claude',
+}
+
+const AI_TEMP_EXTENSION_PATTERN = /\.(tmp|temp|bak|backup|old|orig|swp|swo|swpx)$/i
+const AI_TEMP_NAME_PATTERN = /(?:^|[._-])(tmp|temp|cache|draft|backup|bak|old|orig|swap|swp|swo|swpx)(?:$|[._-])/i
+const STALE_FILE_AGE_MS = 7 * 24 * 60 * 60 * 1000
+const TINY_FILE_SIZE_BYTES = 1024
+
 // Characters that are invalid or very unusual in filenames
 // These are often created by AI tools due to bugs
-const INVALID_FILENAME_CHARS = /[`{}[\]<>|]/
+const SUSPICIOUS_FILENAME_CHARS = /[`{}[\]<>|]/
+const INVISIBLE_FILENAME_CHARS = /[\u200B-\u200D\uFEFF]/
+const UNUSUAL_FILENAME_CHARS = /[^a-zA-Z0-9._-]/
+const ZERO_BYTE_SHORT_NAME_MAX_LENGTH = 3
+const FULL_DISK_SCAN_DEPTH = 6
+const CUSTOM_PATH_SCAN_DEPTH = 8
+
+const WINDOWS_RESERVED_DEVICE_NAMES = new Set([
+  'con',
+  'prn',
+  'aux',
+  'nul',
+  'com1',
+  'com2',
+  'com3',
+  'com4',
+  'com5',
+  'com6',
+  'com7',
+  'com8',
+  'com9',
+  'lpt1',
+  'lpt2',
+  'lpt3',
+  'lpt4',
+  'lpt5',
+  'lpt6',
+  'lpt7',
+  'lpt8',
+  'lpt9',
+])
 
 // Pattern for files that look like AI-generated garbage
 // Must have NO extension and contain unusual characters
 const AI_GARBAGE_PATTERN = /^[^.]+$/  // No extension
 
 const JUNK_PATTERNS: JunkPattern[] = [
-  // Windows device name files (created by buggy AI tools)
-  // These are definitely junk - Windows reserved names should never be files
-  {
-    pattern: /^(nul|NUL|con|CON|prn|PRN|aux|AUX|com[1-9]|COM[1-9]|lpt[1-9]|LPT[1-9])$/i,
-    source: 'AI Tool Bug',
-    description: 'Windows reserved device name accidentally created as file - safe to delete',
-    descriptionZh: 'Windows 保留设备名被意外创建为文件 - 可安全删除',
-    riskLevel: 'low',
-    isExactMatch: true,
-  },
   // Aider specific files (in project directories, not config)
   {
     pattern: /^\.aider\.(tags|chat|history|input).*$/,
@@ -120,7 +176,7 @@ const JUNK_PATTERNS: JunkPattern[] = [
   // Claude Code specific backup files
   {
     pattern: /^\.claude\.json\.backup$/,
-    source: 'Claude Code',
+    source: 'Claude',
     description: 'Claude Code backup file - safe to delete if main config exists',
     descriptionZh: 'Claude Code 备份文件 - 如主配置存在则可安全删除',
     riskLevel: 'low',
@@ -171,10 +227,191 @@ const SAFE_FILENAMES = new Set([
   '.dockerignore', '.env', '.env.local', '.env.example',
 ])
 
+const QUICK_SKIP_DIRS = [
+  'node_modules',
+  '.git',
+  '.svn',
+  '.hg',
+  'vendor',
+  '__pycache__',
+  'venv',
+  '.venv',
+  'dist',
+  'build',
+  'target',
+  '.next',
+  '.nuxt',
+  '.cache',
+  '.local',
+  '.npm',
+  '.pnpm-store',
+  '.pnpm',
+  '.yarn',
+  '.cargo',
+  '.rustup',
+  '.gradle',
+  '.m2',
+  'AppData',
+  'Library',
+]
+
+const DEEP_SKIP_DIRS = [
+  'node_modules',
+  '.git',
+  '.svn',
+  '.hg',
+  'vendor',
+  '__pycache__',
+  'venv',
+  '.venv',
+  'dist',
+  'build',
+  'target',
+  '.next',
+  '.nuxt',
+]
+
+const WINDOWS_ROOT_SKIP_DIRS = [
+  'Windows',
+  'Program Files',
+  'Program Files (x86)',
+  'ProgramData',
+  '$Recycle.Bin',
+  'System Volume Information',
+  'Recovery',
+]
+
+const MAC_ROOT_SKIP_DIRS = [
+  'System',
+  'Applications',
+  'Library',
+  'private',
+  'bin',
+  'sbin',
+  'usr',
+  'etc',
+  'var',
+]
+
+const LINUX_ROOT_SKIP_DIRS = [
+  'bin',
+  'sbin',
+  'usr',
+  'lib',
+  'lib64',
+  'etc',
+  'var',
+  'proc',
+  'sys',
+  'dev',
+  'run',
+  'boot',
+  'opt',
+]
+
+interface ScanOptions {
+  inspectAllFiles: boolean
+  skipDirs: Set<string>
+  skipRootDirs?: Set<string>
+}
+
+function createSkipDirSet(dirs: string[]): Set<string> {
+  if (process.platform === 'win32') {
+    return new Set(dirs.map(dir => dir.toLowerCase()))
+  }
+  return new Set(dirs)
+}
+
+function normalizeSkipName(name: string): string {
+  return process.platform === 'win32' ? name.toLowerCase() : name
+}
+
+function shouldSkipDir(name: string, scanOptions: ScanOptions, currentDepth: number): boolean {
+  const normalized = normalizeSkipName(name)
+  if (currentDepth === 0 && scanOptions.skipRootDirs?.has(normalized)) {
+    return true
+  }
+  return scanOptions.skipDirs.has(normalized)
+}
+
+const QUICK_SCAN_OPTIONS: ScanOptions = {
+  inspectAllFiles: false,
+  skipDirs: createSkipDirSet(QUICK_SKIP_DIRS),
+}
+
+const CUSTOM_PATH_SCAN_OPTIONS: ScanOptions = {
+  inspectAllFiles: true,
+  skipDirs: createSkipDirSet(DEEP_SKIP_DIRS),
+}
+
+const FULL_DISK_SCAN_OPTIONS: ScanOptions = {
+  inspectAllFiles: true,
+  skipDirs: createSkipDirSet(DEEP_SKIP_DIRS),
+  skipRootDirs: createSkipDirSet(
+    process.platform === 'win32'
+      ? WINDOWS_ROOT_SKIP_DIRS
+      : process.platform === 'darwin'
+        ? MAC_ROOT_SKIP_DIRS
+        : LINUX_ROOT_SKIP_DIRS
+  ),
+}
+
+function extractAiToolKeywordFromName(value: string): string | null {
+  const lowerValue = value.toLowerCase()
+  for (const keyword of AI_TOOL_KEYWORDS) {
+    if (lowerValue.includes(keyword)) {
+      return keyword
+    }
+  }
+  return null
+}
+
+function extractAiToolKeywordFromDirName(dirName: string): string | null {
+  const normalized = dirName.toLowerCase()
+  const cleaned = normalized.startsWith('.') ? normalized.slice(1) : normalized
+  if (AI_TOOL_KEYWORD_SET.has(cleaned)) {
+    return cleaned
+  }
+  return null
+}
+
+function getAiToolSource(keyword: string | null): string {
+  if (!keyword) return 'AI Tool'
+  return AI_TOOL_SOURCE_MAP[keyword] || 'AI Tool'
+}
+
+function isAiTempFileName(fileName: string): boolean {
+  return AI_TEMP_EXTENSION_PATTERN.test(fileName) || AI_TEMP_NAME_PATTERN.test(fileName)
+}
+
+function isStaleFile(stats: { mtimeMs: number }): boolean {
+  return Date.now() - stats.mtimeMs > STALE_FILE_AGE_MS
+}
+
+function getWindowsReservedNameInfo(fileName: string): JunkMatchInfo | null {
+  if (process.platform !== 'win32') return null
+  const trimmedName = fileName.replace(/[. ]+$/g, '')
+  const baseName = trimmedName.split('.')[0]
+  if (!baseName) return null
+  if (!WINDOWS_RESERVED_DEVICE_NAMES.has(baseName.toLowerCase())) {
+    return null
+  }
+  return {
+    source: 'AI Tool Bug',
+    description: 'Windows reserved device name accidentally created as file - safe to delete',
+    descriptionZh: 'Windows 保留设备名被意外创建为文件 - 可安全删除',
+    riskLevel: 'low',
+  }
+}
+
 /**
  * Check if a file is likely AI-generated junk based on its characteristics
  */
-async function isLikelyAIJunk(filePath: string, fileName: string): Promise<{
+async function isLikelyAIJunk(
+  filePath: string,
+  fileName: string,
+  aiToolHint: string | null = null
+): Promise<{
   isJunk: boolean
   source: string
   description: string
@@ -183,26 +420,67 @@ async function isLikelyAIJunk(filePath: string, fileName: string): Promise<{
 } | null> {
   // Get file extension
   const ext = path.extname(fileName).toLowerCase()
+  const isDotFile = fileName.startsWith('.')
+  const aiKeyword = extractAiToolKeywordFromName(fileName) ?? aiToolHint
+  const isAiTempCandidate = Boolean(aiKeyword) && isAiTempFileName(fileName)
   
-  // Skip files with known safe extensions
-  if (ext && SAFE_EXTENSIONS.has(ext)) {
+  // Skip files with known safe extensions unless AI temp candidate
+  if (!isAiTempCandidate && ext && SAFE_EXTENSIONS.has(ext)) {
     return null
   }
   
-  // Skip known safe filenames
-  if (SAFE_FILENAMES.has(fileName) || SAFE_FILENAMES.has(fileName.toLowerCase())) {
+  // Skip known safe filenames unless AI temp candidate
+  if (!isAiTempCandidate &&
+      (SAFE_FILENAMES.has(fileName) || SAFE_FILENAMES.has(fileName.toLowerCase()))) {
     return null
+  }
+
+  if (isAiTempCandidate) {
+    try {
+      const stats = await fs.stat(filePath)
+      if (stats.size === 0 || isStaleFile(stats)) {
+        return {
+          isJunk: true,
+          source: getAiToolSource(aiKeyword),
+          description: 'AI temp/cache file (stale or empty) detected by name - safe to delete',
+          descriptionZh: '检测到 AI 临时/缓存文件（已过期或为空）- 可安全删除',
+          riskLevel: 'low',
+        }
+      }
+    } catch {
+      return null
+    }
+  }
+
+  if (!ext && !isDotFile) {
+    try {
+      const stats = await fs.stat(filePath)
+      const hasUnusualChars = UNUSUAL_FILENAME_CHARS.test(fileName)
+      const isShortName = fileName.length <= ZERO_BYTE_SHORT_NAME_MAX_LENGTH
+      if (stats.size === 0 && (isShortName || hasUnusualChars)) {
+        return {
+          isJunk: true,
+          source: aiKeyword ? getAiToolSource(aiKeyword) : 'AI Tool Bug',
+          description: 'Empty no-extension file with short or unusual name - likely AI-generated junk',
+          descriptionZh: '无扩展名的空文件（名称很短或异常）- 可能是 AI 生成的垃圾文件',
+          riskLevel: 'medium',
+        }
+      }
+    } catch {
+      return null
+    }
   }
   
   // Check if filename contains invalid/unusual characters
-  if (INVALID_FILENAME_CHARS.test(fileName)) {
+  const hasSuspiciousChars = SUSPICIOUS_FILENAME_CHARS.test(fileName) || INVISIBLE_FILENAME_CHARS.test(fileName)
+  if (hasSuspiciousChars) {
     // Verify it's a small file (AI junk is usually tiny)
     try {
       const stats = await fs.stat(filePath)
-      if (stats.size < 1024) { // Less than 1KB
+      if (stats.size < TINY_FILE_SIZE_BYTES) { // Less than 1KB
         return {
           isJunk: true,
-          source: 'AI Tool Bug',
+          source: aiKeyword ? getAiToolSource(aiKeyword) : 'AI Tool Bug',
           description: 'File with invalid characters in name - likely AI-generated junk',
           descriptionZh: '文件名包含无效字符 - 可能是 AI 生成的垃圾文件',
           riskLevel: 'medium',
@@ -216,7 +494,7 @@ async function isLikelyAIJunk(filePath: string, fileName: string): Promise<{
   // Check for files without extension that have unusual names
   if (!ext && AI_GARBAGE_PATTERN.test(fileName)) {
     // Must be very short name (1-4 chars) with unusual characters
-    if (fileName.length <= 4 && /[^a-zA-Z0-9._-]/.test(fileName)) {
+    if (fileName.length <= 4 && UNUSUAL_FILENAME_CHARS.test(fileName)) {
       try {
         const stats = await fs.stat(filePath)
         // Must be tiny file
@@ -236,6 +514,33 @@ async function isLikelyAIJunk(filePath: string, fileName: string): Promise<{
   }
   
   return null
+}
+
+function isPermissionError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code
+  return code === 'EPERM' || code === 'EACCES'
+}
+
+function formatDeleteError(
+  error: unknown,
+  language: 'en-US' | 'zh-CN'
+): string {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code
+  if (code === 'EPERM' || code === 'EACCES') {
+    const baseMessage = language === 'zh-CN'
+      ? '权限不足，无法删除。请以管理员身份运行或先获取文件/目录权限。'
+      : 'Permission denied. Run Dev Janitor as administrator or take ownership of the file or folder.'
+    return code ? `${baseMessage} (${code})` : baseMessage
+  }
+  return error instanceof Error ? error.message : 'Unknown error'
+}
+
+async function tryMakeWritable(itemPath: string, isDirectory: boolean): Promise<void> {
+  try {
+    await fs.chmod(itemPath, isDirectory ? 0o777 : 0o666)
+  } catch {
+    // Ignore chmod failures and fall back to original error handling.
+  }
 }
 
 /**
@@ -271,33 +576,129 @@ async function isCodeProject(dirPath: string): Promise<boolean> {
 }
 
 /**
- * Common directories to scan
+ * Common directories to scan with depth configuration
  */
-function getScanDirectories(): string[] {
-  const homeDir = os.homedir()
+interface ScanTarget {
+  path: string
+  maxDepth: number
+}
+
+const HOME_SCAN_DEPTH = 1
+const PROJECT_SCAN_DEPTH = 4
+const AI_CONFIG_SCAN_DEPTH = 4
+
+function getAiToolDirectories(homeDir: string): string[] {
+  const baseNames = [
+    'Aider',
+    'Claude',
+    'Cursor',
+    'Windsurf',
+    'Codeium',
+    'Copilot',
+    'Continue',
+    'Kiro',
+    'OpenAI',
+    'Anthropic',
+  ]
+  const lowerNames = baseNames.map(name => name.toLowerCase())
+  const names = Array.from(new Set([...baseNames, ...lowerNames]))
+
   const dirs: string[] = []
+  for (const name of lowerNames) {
+    dirs.push(path.join(homeDir, `.${name}`))
+  }
+
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming')
+    const localAppData = process.env.LOCALAPPDATA || path.join(homeDir, 'AppData', 'Local')
+    for (const name of names) {
+      dirs.push(path.join(appData, name))
+      dirs.push(path.join(localAppData, name))
+    }
+  } else if (process.platform === 'darwin') {
+    const appSupport = path.join(homeDir, 'Library', 'Application Support')
+    const caches = path.join(homeDir, 'Library', 'Caches')
+    for (const name of names) {
+      dirs.push(path.join(appSupport, name))
+      dirs.push(path.join(caches, name))
+    }
+  } else {
+    const configDir = path.join(homeDir, '.config')
+    const cacheDir = path.join(homeDir, '.cache')
+    const shareDir = path.join(homeDir, '.local', 'share')
+    for (const name of lowerNames) {
+      dirs.push(path.join(configDir, name))
+      dirs.push(path.join(cacheDir, name))
+      dirs.push(path.join(shareDir, name))
+    }
+  }
+
+  return dirs
+}
+
+function mergeScanTargets(targets: ScanTarget[]): ScanTarget[] {
+  const merged = new Map<string, ScanTarget>()
+  for (const target of targets) {
+    const resolvedPath = path.resolve(target.path)
+    const existing = merged.get(resolvedPath)
+    if (!existing || target.maxDepth > existing.maxDepth) {
+      merged.set(resolvedPath, { path: resolvedPath, maxDepth: target.maxDepth })
+    }
+  }
+  return Array.from(merged.values())
+}
+
+function getScanTargets(): ScanTarget[] {
+  const homeDir = os.homedir()
+  const targets: ScanTarget[] = []
   
   // User home directory (shallow scan)
-  dirs.push(homeDir)
+  targets.push({ path: homeDir, maxDepth: HOME_SCAN_DEPTH })
   
   // Common project directories
   const projectDirs = [
-    path.join(homeDir, 'Desktop'),
-    path.join(homeDir, 'Documents'),
-    path.join(homeDir, 'Projects'),
-    path.join(homeDir, 'projects'),
-    path.join(homeDir, 'dev'),
-    path.join(homeDir, 'Development'),
-    path.join(homeDir, 'workspace'),
-    path.join(homeDir, 'code'),
-    path.join(homeDir, 'Code'),
-    path.join(homeDir, 'repos'),
-    path.join(homeDir, 'git'),
+    'Desktop',
+    'Documents',
+    'Downloads',
+    'Projects',
+    'projects',
+    'dev',
+    'Development',
+    'workspace',
+    'Work',
+    'work',
+    'code',
+    'Code',
+    'src',
+    'Source',
+    'repos',
+    'git',
   ]
   
-  dirs.push(...projectDirs)
+  for (const dir of projectDirs) {
+    targets.push({ path: path.join(homeDir, dir), maxDepth: PROJECT_SCAN_DEPTH })
+  }
+
+  // AI tool config/cache directories
+  for (const dir of getAiToolDirectories(homeDir)) {
+    targets.push({ path: dir, maxDepth: AI_CONFIG_SCAN_DEPTH })
+  }
   
-  return dirs
+  return mergeScanTargets(targets)
+}
+
+function getFullDiskTargets(): ScanTarget[] {
+  if (process.platform === 'win32') {
+    const driveTargets: ScanTarget[] = []
+    for (let code = 65; code <= 90; code += 1) {
+      const drive = `${String.fromCharCode(code)}:\\`
+      driveTargets.push({ path: drive, maxDepth: FULL_DISK_SCAN_DEPTH })
+    }
+    return mergeScanTargets(driveTargets)
+  }
+
+  const rootPath = path.parse(os.homedir()).root || '/'
+  return mergeScanTargets([{ path: rootPath, maxDepth: FULL_DISK_SCAN_DEPTH }])
 }
 
 class AICleanupScanner {
@@ -332,20 +733,67 @@ class AICleanupScanner {
   /**
    * Scan a directory for AI junk files
    */
-  private async scanDirectory(dirPath: string, maxDepth: number = 2, currentDepth: number = 0, isInCodeProject: boolean = false): Promise<AIJunkFile[]> {
+  private async scanDirectory(
+    dirPath: string,
+    maxDepth: number = 2,
+    currentDepth: number = 0,
+    isInCodeProject: boolean = false,
+    aiToolHint: string | null = null,
+    scanOptions: ScanOptions = QUICK_SCAN_OPTIONS
+  ): Promise<AIJunkFile[]> {
     const results: AIJunkFile[] = []
     
     if (currentDepth > maxDepth) return results
     
     try {
       // Check if this directory is a code project
-      const isProject = isInCodeProject || await isCodeProject(dirPath)
+      const dirName = path.basename(dirPath)
+      const dirKeyword = extractAiToolKeywordFromDirName(dirName)
+      const isDotDir = dirName.startsWith('.')
+      let isProject = isInCodeProject
+
+      if (!isProject) {
+        if (!scanOptions.inspectAllFiles) {
+          isProject = await isCodeProject(dirPath)
+        } else if (dirKeyword && !isDotDir) {
+          isProject = await isCodeProject(dirPath)
+        }
+      }
+
+      const useDirKeyword = !isProject || isDotDir
+      const currentAiToolHint = useDirKeyword ? (dirKeyword ?? aiToolHint) : aiToolHint
+      const isAiToolDir = currentAiToolHint !== null
+      const shouldInspectFiles = scanOptions.inspectAllFiles || isProject || isAiToolDir
       
       const entries = await fs.readdir(dirPath, { withFileTypes: true })
       
       for (const entry of entries) {
         const fullPath = path.join(dirPath, entry.name)
         
+        const reservedMatch = getWindowsReservedNameInfo(entry.name)
+        if (reservedMatch) {
+          try {
+            const stats = await fs.stat(fullPath)
+            const size = entry.isDirectory() ? await getSize(fullPath) : stats.size
+            
+            results.push({
+              id: Buffer.from(fullPath).toString('base64'),
+              name: entry.name,
+              path: fullPath,
+              size,
+              sizeFormatted: formatBytes(size),
+              type: entry.isDirectory() ? 'directory' : 'file',
+              source: reservedMatch.source,
+              description: this.language === 'zh-CN' ? reservedMatch.descriptionZh : reservedMatch.description,
+              riskLevel: reservedMatch.riskLevel,
+              lastModified: stats.mtime,
+            })
+          } catch {
+            // Skip inaccessible files
+          }
+          continue
+        }
+
         // First check against known patterns
         const pattern = this.matchesPattern(entry.name)
         
@@ -369,9 +817,9 @@ class AICleanupScanner {
           } catch {
             // Skip inaccessible files
           }
-        } else if (entry.isFile() && isProject) {
-          // Only check for AI junk in code project directories
-          const junkInfo = await isLikelyAIJunk(fullPath, entry.name)
+        } else if (entry.isFile() && shouldInspectFiles) {
+          // Check for AI junk in code projects and AI tool directories
+          const junkInfo = await isLikelyAIJunk(fullPath, entry.name, currentAiToolHint)
           if (junkInfo) {
             try {
               const stats = await fs.stat(fullPath)
@@ -395,9 +843,15 @@ class AICleanupScanner {
         
         // Recursively scan subdirectories (but skip node_modules, .git, etc.)
         if (entry.isDirectory() && currentDepth < maxDepth) {
-          const skipDirs = ['node_modules', '.git', '.svn', '.hg', 'vendor', '__pycache__', 'venv', '.venv', 'dist', 'build', 'target', '.next', '.nuxt']
-          if (!skipDirs.includes(entry.name)) {
-            const subResults = await this.scanDirectory(fullPath, maxDepth, currentDepth + 1, isProject)
+          if (!shouldSkipDir(entry.name, scanOptions, currentDepth)) {
+            const subResults = await this.scanDirectory(
+              fullPath,
+              maxDepth,
+              currentDepth + 1,
+              isProject,
+              currentAiToolHint,
+              scanOptions
+            )
             results.push(...subResults)
           }
         }
@@ -414,17 +868,22 @@ class AICleanupScanner {
    */
   async scanAll(): Promise<AICleanupScanResult> {
     const startTime = Date.now()
-    const scanDirs = getScanDirectories()
+    const scanTargets = getScanTargets()
     const allFiles: AIJunkFile[] = []
     const scannedPaths: string[] = []
     
-    for (const dir of scanDirs) {
+    for (const target of scanTargets) {
       try {
-        await fs.access(dir)
-        scannedPaths.push(dir)
-        // Use depth 1 for home, depth 2 for project directories
-        const depth = dir === os.homedir() ? 1 : 2
-        const files = await this.scanDirectory(dir, depth)
+        await fs.access(target.path)
+        scannedPaths.push(target.path)
+        const files = await this.scanDirectory(
+          target.path,
+          target.maxDepth,
+          0,
+          false,
+          null,
+          QUICK_SCAN_OPTIONS
+        )
         allFiles.push(...files)
       } catch {
         // Directory doesn't exist or not accessible
@@ -451,6 +910,50 @@ class AICleanupScanner {
   }
 
   /**
+   * Scan all disks for AI junk files (deep scan)
+   */
+  async scanFullDisk(): Promise<AICleanupScanResult> {
+    const startTime = Date.now()
+    const scanTargets = getFullDiskTargets()
+    const allFiles: AIJunkFile[] = []
+    const scannedPaths: string[] = []
+
+    for (const target of scanTargets) {
+      try {
+        await fs.access(target.path)
+        scannedPaths.push(target.path)
+        const files = await this.scanDirectory(
+          target.path,
+          target.maxDepth,
+          0,
+          false,
+          null,
+          FULL_DISK_SCAN_OPTIONS
+        )
+        allFiles.push(...files)
+      } catch {
+        // Drive not accessible
+      }
+    }
+
+    const uniqueFiles = Array.from(
+      new Map(allFiles.map(f => [f.path, f])).values()
+    )
+
+    uniqueFiles.sort((a, b) => b.size - a.size)
+
+    const totalSize = uniqueFiles.reduce((sum, f) => sum + f.size, 0)
+
+    return {
+      files: uniqueFiles,
+      totalSize,
+      totalSizeFormatted: formatBytes(totalSize),
+      scanTime: Date.now() - startTime,
+      scannedPaths,
+    }
+  }
+
+  /**
    * Scan a specific directory
    */
   async scanPath(targetPath: string): Promise<AICleanupScanResult> {
@@ -458,7 +961,14 @@ class AICleanupScanner {
     
     try {
       await fs.access(targetPath)
-      const files = await this.scanDirectory(targetPath, 3)
+      const files = await this.scanDirectory(
+        targetPath,
+        CUSTOM_PATH_SCAN_DEPTH,
+        0,
+        false,
+        null,
+        CUSTOM_PATH_SCAN_OPTIONS
+      )
       
       // Sort by size descending
       files.sort((a, b) => b.size - a.size)
@@ -495,10 +1005,23 @@ class AICleanupScanner {
       
       // Delete the item
       const stats = await fs.stat(itemPath)
-      if (stats.isDirectory()) {
-        await fs.rm(itemPath, { recursive: true, force: true })
-      } else {
-        await fs.unlink(itemPath)
+      const removeItem = async () => {
+        if (stats.isDirectory()) {
+          await fs.rm(itemPath, { recursive: true, force: true })
+        } else {
+          await fs.unlink(itemPath)
+        }
+      }
+
+      try {
+        await removeItem()
+      } catch (error) {
+        if (isPermissionError(error)) {
+          await tryMakeWritable(itemPath, stats.isDirectory())
+          await removeItem()
+        } else {
+          throw error
+        }
       }
       
       return {
@@ -513,7 +1036,7 @@ class AICleanupScanner {
         success: false,
         freedSpace: 0,
         freedSpaceFormatted: '0 B',
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: formatDeleteError(error, this.language),
       }
     }
   }

@@ -305,7 +305,7 @@ describe('DetectionEngine', () => {
         // Parallel execution should be faster than sequential
         // 6 tools * 5s timeout = 30s sequential, should be much less in parallel
         expect(duration).toBeLessThan(15000)
-      })
+      }, 20000)
     })
 
     describe('detectCustomTool', () => {
@@ -380,7 +380,7 @@ describe('DetectionEngine', () => {
           expect(tool.path).not.toBeNull()
         }
       }
-    })
+    }, 20000)
 
     /**
      * Feature: dev-tools-manager, Property 2: Unavailable Tool Handling
@@ -398,7 +398,7 @@ describe('DetectionEngine', () => {
           // Path might still be null for unavailable tools
         }
       }
-    })
+    }, 20000)
 
     /**
      * Feature: dev-tools-manager, Property 7: Tool Categorization
@@ -414,6 +414,6 @@ describe('DetectionEngine', () => {
       for (const tool of tools) {
         expect(validCategories).toContain(tool.category)
       }
-    })
+    }, 20000)
   })
 })

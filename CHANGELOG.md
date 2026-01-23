@@ -5,6 +5,26 @@ All notable changes to Dev Janitor will be documented in this file.
 
 ---
 
+## [1.7.5] - 2026-01-23
+
+### Added / 新增
+- **AI Cleanup scan modes**: Full disk scan or specific folder scan, with folder picker
+- **AI 垃圾清理扫描模式**: 支持全盘扫描/指定目录扫描，并提供目录选择
+
+### Changed / 变更
+- **AI Cleanup detection**: Expanded AI junk heuristics (AI tool keywords, stale temp files, zero-byte short/odd names) and scan coverage/skip rules
+- **AI 垃圾清理检测**: 扩展 AI 垃圾文件启发式规则（AI 关键词、过期临时文件、零字节短/异常名）并优化扫描范围/跳过规则
+
+### Fixed / 修复
+- **Windows cache scan**: Escape PowerShell LiteralPath to avoid path quoting issues
+- **Windows 缓存扫描**: PowerShell LiteralPath 路径转义，避免引号问题
+- **CSP hardening**: Remove `unsafe-inline` from script-src
+- **CSP 加固**: script-src 移除 `unsafe-inline`
+- **AI cleanup deletion feedback**: Clearer permission errors and chmod retry
+- **AI 清理删除反馈**: 权限不足时提示更清晰并尝试解除只读
+
+---
+
 ## [1.7.4] - 2026-01-22
 
 ### Added / 新增
@@ -165,6 +185,7 @@ All notable changes to Dev Janitor will be documented in this file.
 
 ---
 
+[1.7.5]: https://github.com/cocojojo5213/Dev-Janitor/releases/tag/v1.7.5
 [1.7.4]: https://github.com/cocojojo5213/Dev-Janitor/releases/tag/v1.7.4
 [1.7.3]: https://github.com/cocojojo5213/Dev-Janitor/releases/tag/v1.7.3
 [1.7.2]: https://github.com/cocojojo5213/Dev-Janitor/releases/tag/v1.7.2

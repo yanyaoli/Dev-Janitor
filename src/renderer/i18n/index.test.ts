@@ -396,15 +396,15 @@ describe('Translation Coverage', () => {
     it('should change language and update translations', async () => {
       // Start with English
       await changeLanguage('en-US')
-      expect(t('app.title')).toBe('Dev Tools Manager')
+      expect(t('app.title')).toBe('Dev Janitor')
       
       // Switch to Chinese
       await changeLanguage('zh-CN')
-      expect(t('app.title')).toBe('开发工具管理器')
+      expect(t('app.title')).toBe('开发清道夫')
       
       // Switch back to English
       await changeLanguage('en-US')
-      expect(t('app.title')).toBe('Dev Tools Manager')
+      expect(t('app.title')).toBe('Dev Janitor')
     })
 
     it('should persist language after change', async () => {

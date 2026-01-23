@@ -174,7 +174,9 @@ interface ElectronAPI {
   // AI Cleanup API
   aiCleanup: {
     scanAll: (language?: 'en-US' | 'zh-CN') => Promise<AICleanupScanResult>
+    scanFullDisk: (language?: 'en-US' | 'zh-CN') => Promise<AICleanupScanResult>
     scanPath: (targetPath: string, language?: 'en-US' | 'zh-CN') => Promise<AICleanupScanResult>
+    selectDirectory: () => Promise<string | null>
     delete: (itemId: string) => Promise<AICleanupResult>
     deleteMultiple: (itemIds: string[]) => Promise<AICleanupResult[]>
   }
@@ -296,7 +298,9 @@ function createDegradedAPI(): ElectronAPI {
 
     aiCleanup: {
       scanAll: createDegradedPromise,
+      scanFullDisk: createDegradedPromise,
       scanPath: createDegradedPromise,
+      selectDirectory: createDegradedPromise,
       delete: createDegradedPromise,
       deleteMultiple: createDegradedPromise,
     },
@@ -476,7 +480,9 @@ function createElectronAPI(): ElectronAPI {
     // AI Cleanup API
     aiCleanup: {
       scanAll: (language?: 'en-US' | 'zh-CN') => ipcRenderer.invoke('ai-cleanup:scan-all', language),
+      scanFullDisk: (language?: 'en-US' | 'zh-CN') => ipcRenderer.invoke('ai-cleanup:scan-full-disk', language),
       scanPath: (targetPath: string, language?: 'en-US' | 'zh-CN') => ipcRenderer.invoke('ai-cleanup:scan-path', targetPath, language),
+      selectDirectory: () => ipcRenderer.invoke('ai-cleanup:select-directory'),
       delete: (itemId: string) => ipcRenderer.invoke('ai-cleanup:delete', itemId),
       deleteMultiple: (itemIds: string[]) => ipcRenderer.invoke('ai-cleanup:delete-multiple', itemIds),
     },

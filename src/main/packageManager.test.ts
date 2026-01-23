@@ -5,7 +5,7 @@
  * Tests Properties 5 and 6 from the design document
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fc from 'fast-check'
 import {
   parseNpmOutput,
@@ -17,6 +17,62 @@ import {
   isPackageManagerAvailable,
   PackageManager,
 } from './packageManager'
+import * as commandExecutor from './commandExecutor'
+
+vi.mock('./commandExecutor')
+
+const mockExecuteSafe = vi.mocked(commandExecutor.executeSafe)
+const npmListOutput = JSON.stringify({
+  dependencies: {
+    typescript: { version: '5.0.0' },
+    eslint: { version: '8.40.0' }
+  }
+})
+const pipListOutput = JSON.stringify([
+  { name: 'requests', version: '2.31.0' },
+  { name: 'numpy', version: '1.24.0' }
+])
+const composerListOutput = JSON.stringify([
+  { name: 'vendor/package1', version: '1.0.0', description: 'A package' }
+])
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.mocked(commandExecutor.isWindows).mockReturnValue(false)
+  mockExecuteSafe.mockImplementation(async (command: string) => {
+    const trimmed = command.trim()
+
+    if (trimmed === 'npm --version') {
+      return { success: true, stdout: '9.0.0', stderr: '', exitCode: 0 }
+    }
+
+    if (trimmed === 'npm list -g --depth=0 --json') {
+      return { success: true, stdout: npmListOutput, stderr: '', exitCode: 0 }
+    }
+
+    if (trimmed === 'pip3 --version' || trimmed === 'pip --version' || trimmed === 'py -m pip --version') {
+      return { success: true, stdout: 'pip 23.0', stderr: '', exitCode: 0 }
+    }
+
+    if (trimmed === 'pip3 list --format=json' || trimmed === 'pip list --format=json' || trimmed === 'py -m pip list --format=json') {
+      return { success: true, stdout: pipListOutput, stderr: '', exitCode: 0 }
+    }
+
+    if (trimmed === 'composer --version') {
+      return { success: true, stdout: 'Composer version 2.0.0', stderr: '', exitCode: 0 }
+    }
+
+    if (trimmed === 'composer global show --format=json') {
+      return { success: true, stdout: composerListOutput, stderr: '', exitCode: 0 }
+    }
+
+    if (trimmed === 'composer global show') {
+      return { success: true, stdout: 'vendor/package1 v1.0.0 A package', stderr: '', exitCode: 0 }
+    }
+
+    return { success: false, stdout: '', stderr: 'Command failed', exitCode: 1 }
+  })
+})
 
 describe('PackageManager', () => {
   describe('parseNpmOutput', () => {

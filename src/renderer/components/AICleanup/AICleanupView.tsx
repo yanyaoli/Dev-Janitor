@@ -22,6 +22,8 @@ import {
   Statistic,
   Row,
   Col,
+  Input,
+  Radio,
 } from 'antd'
 import { 
   DeleteOutlined, 
@@ -40,6 +42,8 @@ import type { AIJunkFile, AICleanupResult, AICleanupScanResult } from '@shared/t
 
 const { Title, Text, Paragraph } = Typography
 
+type ScanMode = 'full' | 'path'
+
 const AICleanupView: React.FC = () => {
   const { t, i18n } = useTranslation()
   const [loading, setLoading] = useState(false)
@@ -48,26 +52,56 @@ const AICleanupView: React.FC = () => {
   const [selectedItems, setSelectedItems] = useState<string[]>([])
   const [deleteResults, setDeleteResults] = useState<AICleanupResult[]>([])
   const [showResultModal, setShowResultModal] = useState(false)
+  const [scanMode, setScanMode] = useState<ScanMode>('full')
+  const [targetPath, setTargetPath] = useState('')
+  const [hasScanned, setHasScanned] = useState(false)
 
   // Scan for AI junk files
-  const scanFiles = useCallback(async () => {
+  const runScan = useCallback(async () => {
     setLoading(true)
     try {
       const lang = i18n.language as 'en-US' | 'zh-CN'
-      const result = await window.electronAPI.aiCleanup.scanAll(lang)
+      const result = scanMode === 'full'
+        ? await window.electronAPI.aiCleanup.scanFullDisk(lang)
+        : await window.electronAPI.aiCleanup.scanPath(targetPath, lang)
       setScanResult(result)
       setSelectedItems([])
+      setHasScanned(true)
     } catch (error) {
       message.error(t('aiCleanup.scanError'))
       console.error('Failed to scan for AI junk files:', error)
     } finally {
       setLoading(false)
     }
-  }, [t, i18n.language])
+  }, [t, i18n.language, scanMode, targetPath])
+
+  const handleScan = useCallback(async () => {
+    if (scanMode === 'path' && !targetPath.trim()) {
+      message.warning(t('aiCleanup.selectFolderFirst'))
+      return
+    }
+
+    await runScan()
+  }, [scanMode, targetPath, runScan, t])
 
   useEffect(() => {
-    scanFiles()
-  }, [scanFiles])
+    setSelectedItems([])
+    setHasScanned(false)
+    setScanResult(null)
+  }, [scanMode])
+
+  const handleSelectDirectory = async () => {
+    try {
+      const selectedPath = await window.electronAPI.aiCleanup.selectDirectory()
+      if (selectedPath) {
+        setTargetPath(selectedPath)
+        setScanMode('path')
+      }
+    } catch (error) {
+      message.error(t('aiCleanup.selectFolderError'))
+      console.error('Failed to select directory:', error)
+    }
+  }
 
   // Handle item selection
   const handleSelectItem = (itemId: string, checked: boolean) => {
@@ -116,7 +150,7 @@ const AICleanupView: React.FC = () => {
           const results = await window.electronAPI.aiCleanup.deleteMultiple(selectedItems)
           setDeleteResults(results)
           setShowResultModal(true)
-          await scanFiles()
+          await runScan()
         } catch (error) {
           message.error(t('aiCleanup.deleteError'))
           console.error('Failed to delete AI junk files:', error)
@@ -158,7 +192,7 @@ const AICleanupView: React.FC = () => {
               error: result.error 
             }))
           }
-          await scanFiles()
+          await runScan()
         } catch (error) {
           message.error(t('aiCleanup.deleteError'))
           console.error('Failed to delete AI junk file:', error)
@@ -303,6 +337,8 @@ const AICleanupView: React.FC = () => {
   const selectedSize = scanResult?.files
     .filter(f => selectedItems.includes(f.id))
     .reduce((sum, f) => sum + f.size, 0) || 0
+
+  const scanButtonLabel = hasScanned ? t('aiCleanup.rescan') : t('aiCleanup.scan')
   
   const formatBytes = (bytes: number): string => {
     if (bytes === 0) return '0 B'
@@ -335,10 +371,10 @@ const AICleanupView: React.FC = () => {
         <Space>
           <Button
             icon={<ReloadOutlined />}
-            onClick={scanFiles}
+            onClick={handleScan}
             loading={loading}
           >
-            {t('aiCleanup.refresh')}
+            {scanButtonLabel}
           </Button>
           <Button
             type="primary"
@@ -353,8 +389,42 @@ const AICleanupView: React.FC = () => {
         </Space>
       </div>
 
+      {/* Scan Options */}
+      <Card size="small" style={{ marginBottom: 24 }}>
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Space wrap>
+            <Text strong>{t('aiCleanup.scanMode')}</Text>
+            <Radio.Group
+              value={scanMode}
+              onChange={(event) => setScanMode(event.target.value as ScanMode)}
+              buttonStyle="solid"
+            >
+              <Radio.Button value="full">{t('aiCleanup.scanModeFull')}</Radio.Button>
+              <Radio.Button value="path">{t('aiCleanup.scanModePath')}</Radio.Button>
+            </Radio.Group>
+          </Space>
+
+          {scanMode === 'path' && (
+            <Space.Compact style={{ width: '100%' }}>
+              <Input
+                value={targetPath}
+                onChange={(event) => setTargetPath(event.target.value)}
+                placeholder={t('aiCleanup.pathPlaceholder')}
+              />
+              <Button onClick={handleSelectDirectory}>
+                {t('aiCleanup.browse')}
+              </Button>
+            </Space.Compact>
+          )}
+
+          {scanMode === 'full' && (
+            <Text type="warning">{t('aiCleanup.fullScanWarning')}</Text>
+          )}
+        </Space>
+      </Card>
+
       {/* Statistics */}
-      {scanResult && (
+      {scanResult && hasScanned && (
         <Row gutter={16} style={{ marginBottom: 24 }}>
           <Col span={8}>
             <Card size="small">
@@ -391,6 +461,11 @@ const AICleanupView: React.FC = () => {
           <div className="flex justify-center items-center py-12">
             <Spin size="large" tip={t('aiCleanup.scanning')} />
           </div>
+        ) : !hasScanned ? (
+          <Empty
+            description={t('aiCleanup.noScan')}
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
         ) : scanResult?.files.length === 0 ? (
           <Empty
             description={t('aiCleanup.noFiles')}
@@ -409,7 +484,7 @@ const AICleanupView: React.FC = () => {
       </Card>
 
       {/* Scan Info */}
-      {scanResult && (
+      {scanResult && hasScanned && (
         <div className="mt-4 text-right">
           <Text type="secondary">
             {t('aiCleanup.scanTime', { time: scanResult.scanTime })}

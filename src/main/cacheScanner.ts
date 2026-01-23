@@ -120,8 +120,9 @@ async function getDirectorySizeFast(dirPath: string): Promise<number> {
     
     if (isWin) {
       // Windows: use PowerShell for faster calculation
+      const escapedPath = dirPath.replace(/'/g, "''")
       result = await execAsync(
-        `powershell -Command "(Get-ChildItem -Path '${dirPath}' -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum"`,
+        `powershell -Command "(Get-ChildItem -LiteralPath '${escapedPath}' -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum"`,
         { timeout: 10000 }
       )
       const size = parseInt(result.stdout.trim(), 10)

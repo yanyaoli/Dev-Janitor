@@ -15,11 +15,14 @@
  * ============================================================================
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import * as fc from 'fast-check'
 import { PyenvHandler } from './pyenvHandler'
 import { TieredPathSearch } from '../tieredPathSearch'
 import { PathCache } from '../pathCache'
+import * as commandExecutor from '../../commandExecutor'
+
+vi.mock('../../commandExecutor')
 
 describe('PyenvHandler', () => {
   let handler: PyenvHandler
@@ -27,6 +30,13 @@ describe('PyenvHandler', () => {
   let cache: PathCache
 
   beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(commandExecutor.executeSafe).mockResolvedValue({
+      success: true,
+      stdout: '',
+      stderr: '',
+      exitCode: 0
+    })
     cache = new PathCache()
     pathSearch = new TieredPathSearch(cache)
     handler = new PyenvHandler(pathSearch)

@@ -12,7 +12,7 @@
  * Validates: Requirements 1.1, 1.3, 2.1, 2.2, 2.3, 2.4, 3.1, 4.1, 10.1, 11.1
  */
 
-import { ipcMain, BrowserWindow, shell, app } from 'electron'
+import { ipcMain, BrowserWindow, shell, app, dialog } from 'electron'
 import { detectionEngine } from './detectionEngine'
 import { packageManager, PackageDiscovery } from './packageManager'
 import { serviceMonitor } from './serviceMonitor'
@@ -897,6 +897,27 @@ function registerAICleanupHandlers(): void {
     }
   })
 
+  // Scan full disk for AI junk files (deep scan)
+  ipcMain.handle('ai-cleanup:scan-full-disk', async (_event, language?: 'en-US' | 'zh-CN'): Promise<AICleanupScanResult> => {
+    try {
+      if (language) {
+        aiCleanupScanner.setLanguage(language)
+      }
+      const result = await aiCleanupScanner.scanFullDisk()
+      return result
+    } catch (error) {
+      console.error('Error scanning full disk for AI junk files:', error)
+      sendToAllWindows('error', `Failed to scan full disk: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      return {
+        files: [],
+        totalSize: 0,
+        totalSizeFormatted: '0 B',
+        scanTime: 0,
+        scannedPaths: [],
+      }
+    }
+  })
+
   // Scan a specific path for AI junk files
   ipcMain.handle('ai-cleanup:scan-path', async (_event, targetPath: string, language?: 'en-US' | 'zh-CN'): Promise<AICleanupScanResult> => {
     try {
@@ -928,6 +949,31 @@ function registerAICleanupHandlers(): void {
         scanTime: 0,
         scannedPaths: [],
       }
+    }
+  })
+
+  // Select a directory for AI cleanup scan
+  ipcMain.handle('ai-cleanup:select-directory', async (event): Promise<string | null> => {
+    try {
+      if (!validateIPCSender(event)) {
+        console.warn('Security warning: IPC message from untrusted sender for ai-cleanup:select-directory')
+        return null
+      }
+
+      const window = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getFocusedWindow()
+      const options = { properties: ['openDirectory'] as Array<'openDirectory'> }
+      const result = window
+        ? await dialog.showOpenDialog(window, options)
+        : await dialog.showOpenDialog(options)
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return null
+      }
+
+      return result.filePaths[0]
+    } catch (error) {
+      console.error('Error selecting directory for AI cleanup:', error)
+      return null
     }
   })
 
@@ -1076,6 +1122,12 @@ export function cleanupIPCHandlers(): void {
   ipcMain.removeHandler('cache:scan-all')
   ipcMain.removeHandler('cache:clean')
   ipcMain.removeHandler('cache:clean-multiple')
+  ipcMain.removeHandler('ai-cleanup:scan-all')
+  ipcMain.removeHandler('ai-cleanup:scan-full-disk')
+  ipcMain.removeHandler('ai-cleanup:scan-path')
+  ipcMain.removeHandler('ai-cleanup:select-directory')
+  ipcMain.removeHandler('ai-cleanup:delete')
+  ipcMain.removeHandler('ai-cleanup:delete-multiple')
   
   ipcHandlersRegistered = false
   console.log('All IPC handlers cleaned up')

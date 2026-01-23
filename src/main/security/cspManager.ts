@@ -75,7 +75,7 @@ export type CSPDirective =
  */
 export const CSP_POLICY: Record<CSPDirective, string[]> = {
   'default-src': ["'self'"],
-  'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // Vite 打包需要
+  'script-src': ["'self'", "'unsafe-eval'"], // Vite 打包需要
   'style-src': ["'self'", "'unsafe-inline'"], // Ant Design 需要内联样式
   'img-src': ["'self'", 'data:', 'https:'],
   'connect-src': ["'self'", 'https://api.openai.com', 'https://*.openai.com'], // AI API
